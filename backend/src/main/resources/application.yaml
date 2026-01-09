@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: fuel-finder
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/${POSTGRES_DB:fuelfinder}
+    username: ${POSTGRES_USER:fuelfinder}
+    password: ${POSTGRES_PASSWORD:change-me}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
