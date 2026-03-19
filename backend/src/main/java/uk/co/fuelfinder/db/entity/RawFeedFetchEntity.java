@@ -1,11 +1,9 @@
-package uk.fuelfinder.db.entity;
+package uk.co.fuelfinder.db.entity;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import uk.fuelfinder.db.converters.JsonNodeConverter;
+import lombok.*;
+import uk.co.fuelfinder.db.converters.JsonNodeConverter;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -13,7 +11,9 @@ import java.util.UUID;
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
 @Entity
+@Builder
 @Table(name = "raw_feed_fetch")
 public class RawFeedFetchEntity {
 
