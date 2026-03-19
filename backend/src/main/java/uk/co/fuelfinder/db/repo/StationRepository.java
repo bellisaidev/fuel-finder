@@ -1,7 +1,7 @@
-package uk.fuelfinder.db.repo;
+package uk.co.fuelfinder.db.repo;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import uk.fuelfinder.db.entity.StationEntity;
+import uk.co.fuelfinder.db.entity.StationEntity;
 
 import java.util.Optional;
 import java.util.UUID;

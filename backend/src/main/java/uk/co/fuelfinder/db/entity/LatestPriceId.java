@@ -1,4 +1,4 @@
-package uk.fuelfinder.db.entity;
+package uk.co.fuelfinder.db.entity;
 
 import jakarta.persistence.*;
 import java.io.Serializable;

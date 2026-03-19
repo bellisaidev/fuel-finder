@@ -1,4 +1,4 @@
-package uk.fuelfinder;
+package uk.co.fuelfinder;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
