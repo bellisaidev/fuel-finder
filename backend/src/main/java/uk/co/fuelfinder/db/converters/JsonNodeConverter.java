@@ -1,4 +1,4 @@
-package uk.fuelfinder.db.converters;
+package uk.co.fuelfinder.db.converters;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
