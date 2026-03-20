@@ -21,10 +21,10 @@ public class IngestionRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        var retailer = retailerRepository.findByName("SHELL")
-                .orElseThrow(() -> new IllegalStateException("Retailer SHELL not found"));
+        var source = retailerRepository.findByName("FUEL_FINDER_API")
+                .orElseThrow(() -> new IllegalStateException("Source FUEL_FINDER_API not found"));
 
-        var summary = service.ingest(retailer);
+        var summary = service.ingest(source);
         log.info("Ingestion done: {}", summary);
     }
 }
