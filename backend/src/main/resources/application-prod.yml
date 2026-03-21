@@ -1,0 +1,4 @@
+fuel-finder:
+  api:
+    base-url: https://www.fuel-finder.service.gov.uk/api/v1
+    token-url: https://www.fuel-finder.service.gov.uk/api/v1/oauth/generate_access_token
