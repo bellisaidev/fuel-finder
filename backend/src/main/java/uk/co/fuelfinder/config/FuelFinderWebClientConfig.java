@@ -9,7 +9,14 @@ import uk.co.fuelfinder.ingestion.auth.FuelFinderApiProperties;
 public class FuelFinderWebClientConfig {
 
     @Bean
-    public WebClient fuelFinderWebClient(WebClient.Builder builder, FuelFinderApiProperties properties) {
+    public WebClient fuelFinderAuthWebClient(WebClient.Builder builder, FuelFinderApiProperties properties) {
+        return builder
+                .baseUrl(properties.getBaseUrl())
+                .build();
+    }
+
+    @Bean
+    public WebClient fuelFinderApiWebClient(WebClient.Builder builder, FuelFinderApiProperties properties) {
         return builder
                 .baseUrl(properties.getBaseUrl())
                 .build();
