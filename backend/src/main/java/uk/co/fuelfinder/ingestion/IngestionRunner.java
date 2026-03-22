@@ -6,6 +6,13 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import uk.co.fuelfinder.ingestion.auth.FuelFinderTokenProvider;
 import uk.co.fuelfinder.ingestion.auth.FuelFinderApiProperties;
+import uk.co.fuelfinder.ingestion.exception.FuelFinderAuthenticationException;
+import uk.co.fuelfinder.ingestion.exception.FuelFinderConnectivityException;
+import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
+import uk.co.fuelfinder.ingestion.fetch.FuelFinderPfsClient;
+import uk.co.fuelfinder.ingestion.fetch.PfsStationDto;
+
+import java.util.List;
 
 @Slf4j
 @Component
@@ -14,13 +21,16 @@ public class IngestionRunner implements CommandLineRunner {
 
     private final FuelFinderApiProperties properties;
     private final FuelFinderTokenProvider tokenProvider;
+    private final FuelFinderPfsClient pfsClient;
 
     public IngestionRunner(
             FuelFinderApiProperties properties,
-            FuelFinderTokenProvider tokenProvider
+            FuelFinderTokenProvider tokenProvider,
+            FuelFinderPfsClient pfsClient
     ) {
         this.properties = properties;
         this.tokenProvider = tokenProvider;
+        this.pfsClient = pfsClient;
     }
 
     @Override
@@ -29,10 +39,30 @@ public class IngestionRunner implements CommandLineRunner {
         log.info("Fuel Finder tokenPath={}", properties.getOauth().getTokenPath());
         log.info("Fuel Finder clientIdPresent={}", properties.getOauth().getClientId() != null);
 
-        String accessToken = tokenProvider.getAccessToken();
+        try {
+            String accessToken = tokenProvider.getAccessToken();
+            log.info("Fuel Finder access token acquired successfully: present={}",
+                    accessToken != null && !accessToken.isBlank());
 
-        log.info("Fuel Finder access token acquired successfully: present={}",
-                accessToken != null && !accessToken.isBlank());
-        log.info("Fuel Finder access token length={}", accessToken != null ? accessToken.length() : 0);
+            List<PfsStationDto> stations = pfsClient.fetchBatch(1);
+            log.info("Fuel Finder PFS stations fetched: {}", stations.size());
+
+            if (!stations.isEmpty()) {
+                PfsStationDto first = stations.get(0);
+                log.info("Fuel Finder sample station: nodeId={}, tradingName={}, brandName={}",
+                        first.nodeId(),
+                        first.tradingName(),
+                        first.brandName());
+            }
+
+        } catch (FuelFinderConnectivityException e) {
+            log.warn("Fuel Finder connectivity issue: {}. Is VPN enabled?", e.getMessage());
+
+        } catch (FuelFinderAuthenticationException e) {
+            log.error("Fuel Finder authentication failed: {}", e.getMessage());
+
+        } catch (FuelFinderIntegrationException e) {
+            log.error("Fuel Finder integration failed: {}", e.getMessage(), e);
+        }
     }
 }
