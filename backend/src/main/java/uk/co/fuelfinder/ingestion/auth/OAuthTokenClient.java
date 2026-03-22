@@ -122,7 +122,6 @@ public class OAuthTokenClient {
             log.info("Fuel Finder token request url={}{}",
                     properties.getBaseUrl(),
                     properties.getOauth().getTokenPath());
-            log.info("Fuel Finder token request body={}", safeBody);
         } catch (Exception e) {
             log.warn("Unable to serialize safe Fuel Finder token request body", e);
         }
