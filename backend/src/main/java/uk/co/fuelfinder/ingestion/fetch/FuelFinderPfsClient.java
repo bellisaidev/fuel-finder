@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import uk.co.fuelfinder.ingestion.auth.FuelFinderTokenProvider;
+import uk.co.fuelfinder.ingestion.fetch.dto.PfsStationDto;
 
 import java.util.List;
 
