@@ -2,6 +2,7 @@ package uk.co.fuelfinder.ingestion.auth;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
 
 import java.time.Instant;
 
@@ -20,18 +21,19 @@ public class FuelFinderTokenProvider {
 
     public synchronized String getAccessToken() {
         if (accessToken == null || expiresAt == null || Instant.now().isAfter(expiresAt.minusSeconds(30))) {
-            log.info("Fuel Finder token cache miss/expired, requesting new token");
+            log.info("Fuel Finder token cache miss or expired, requesting new token");
 
-            TokenResponse tokenResponse = oAuthTokenClient.generateAccessToken();
+            try {
+                TokenResponse tokenResponse = oAuthTokenClient.generateAccessToken();
 
-            if (tokenResponse == null || tokenResponse.data() == null || tokenResponse.data().access_token() == null) {
-                throw new IllegalStateException("Failed to obtain access token from Fuel Finder OAuth API");
+                this.accessToken = tokenResponse.data().access_token();
+                this.expiresAt = Instant.now().plusSeconds(tokenResponse.data().expires_in());
+
+                log.info("Fuel Finder token cached successfully, expiresAt={}", this.expiresAt);
+            } catch (FuelFinderIntegrationException e) {
+                log.error("Unable to obtain Fuel Finder access token: {}", e.getMessage());
+                throw e;
             }
-
-            this.accessToken = tokenResponse.data().access_token();
-            this.expiresAt = Instant.now().plusSeconds(tokenResponse.data().expires_in());
-
-            log.info("Fuel Finder token cached successfully, expiresAt={}", this.expiresAt);
         } else {
             log.info("Fuel Finder token cache hit, expiresAt={}", this.expiresAt);
         }
