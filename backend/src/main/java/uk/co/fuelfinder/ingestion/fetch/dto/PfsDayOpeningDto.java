@@ -1,4 +1,4 @@
-package uk.co.fuelfinder.ingestion.fetch;
+package uk.co.fuelfinder.ingestion.fetch.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 

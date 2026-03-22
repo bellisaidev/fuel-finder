@@ -4,13 +4,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
-import uk.co.fuelfinder.ingestion.auth.FuelFinderTokenProvider;
 import uk.co.fuelfinder.ingestion.auth.FuelFinderApiProperties;
+import uk.co.fuelfinder.ingestion.auth.FuelFinderTokenProvider;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderAuthenticationException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderConnectivityException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
+import uk.co.fuelfinder.ingestion.fetch.FuelFinderFuelPricesClient;
 import uk.co.fuelfinder.ingestion.fetch.FuelFinderPfsClient;
-import uk.co.fuelfinder.ingestion.fetch.PfsStationDto;
+import uk.co.fuelfinder.ingestion.fetch.dto.FuelPricesStationDto;
+import uk.co.fuelfinder.ingestion.fetch.dto.PfsStationDto;
 
 import java.util.List;
 
@@ -22,15 +24,18 @@ public class IngestionRunner implements CommandLineRunner {
     private final FuelFinderApiProperties properties;
     private final FuelFinderTokenProvider tokenProvider;
     private final FuelFinderPfsClient pfsClient;
+    private final FuelFinderFuelPricesClient fuelPricesClient;
 
     public IngestionRunner(
             FuelFinderApiProperties properties,
             FuelFinderTokenProvider tokenProvider,
-            FuelFinderPfsClient pfsClient
+            FuelFinderPfsClient pfsClient,
+            FuelFinderFuelPricesClient fuelPricesClient
     ) {
         this.properties = properties;
         this.tokenProvider = tokenProvider;
         this.pfsClient = pfsClient;
+        this.fuelPricesClient = fuelPricesClient;
     }
 
     @Override
@@ -44,6 +49,7 @@ public class IngestionRunner implements CommandLineRunner {
             log.info("Fuel Finder access token acquired successfully: present={}",
                     accessToken != null && !accessToken.isBlank());
 
+            // ---- PFS stations ----
             List<PfsStationDto> stations = pfsClient.fetchBatch(1);
             log.info("Fuel Finder PFS stations fetched: {}", stations.size());
 
@@ -53,6 +59,18 @@ public class IngestionRunner implements CommandLineRunner {
                         first.nodeId(),
                         first.tradingName(),
                         first.brandName());
+            }
+
+            // ---- Fuel prices ----
+            List<FuelPricesStationDto> fuelPricesStations = fuelPricesClient.fetchFuelPrices(1);
+            log.info("Fuel Finder fuel prices stations fetched: {}", fuelPricesStations.size());
+
+            if (!fuelPricesStations.isEmpty()) {
+                FuelPricesStationDto first = fuelPricesStations.get(0);
+                log.info("Fuel Finder sample fuel prices station: nodeId={}, tradingName={}, pricesCount={}",
+                        first.nodeId(),
+                        first.tradingName(),
+                        first.fuelPrices() == null ? 0 : first.fuelPrices().size());
             }
 
         } catch (FuelFinderConnectivityException e) {
