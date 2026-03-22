@@ -1,23 +1,30 @@
+# 🚀 Fuel Finder (Backend MVP)
 
-# 🚀 Fuel Finder (MVP)
+Geo-based fuel price aggregation platform built on the UK Fuel Finder Scheme open data.
 
-Geo-based fuel price aggregator built on UK Fuel Finder Scheme open data.
+Fuel Finder is a backend-focused MVP designed to ingest, store, and expose fuel price data through geospatial APIs, with a strong focus on data correctness, auditability, and scalable architecture.
 
-Fuel Finder is a backend-focused MVP designed to aggregate fuel price data from multiple retailers and expose geospatial APIs to find the cheapest fuel nearby.
-
-The project focuses on data correctness, auditability, and scalable design, rather than UI polish.
+The project simulates a **production-style backend ingestion and geospatial data platform**, rather than a simple CRUD application.
 
 ---
 
 # 🎯 Project Goal
 
-Build a public MVP (potential startup) that:
+Build a backend system that:
 
-* Aggregates fuel price data from UK Fuel Finder Scheme
-* Stores full historical price data per station
-* Provides geo-based APIs for “cheapest fuel near me”
-* Is designed to scale without premature overengineering
-* Demonstrates real-world backend architecture and data engineering practices
+* Integrates with the **UK Fuel Finder Scheme API**
+* Ingests fuel station and fuel price data in batches
+* Stores **full historical price data** (append-only model)
+* Provides **geospatial APIs** to find the cheapest fuel nearby
+* Ensures **idempotent ingestion and full auditability**
+* Demonstrates **real-world backend architecture and data engineering practices**
+
+This project is designed as:
+
+* Portfolio project
+* Backend architecture showcase
+* Data ingestion platform MVP
+* Potential startup MVP foundation
 
 ---
 
@@ -28,15 +35,16 @@ Build a public MVP (potential startup) that:
 * Java 21
 * Spring Boot 3
 * Spring Web
-* Spring WebClient (for external APIs)
+* Spring WebClient (external API integration)
 * Spring Data JPA
-* Hibernate + Hibernate Spatial
+* Hibernate
+* Hibernate Spatial
 * Lombok
 
 ## Database
 
 * PostgreSQL
-* PostGIS
+* PostGIS (geospatial queries)
 
 ## Data & Migrations
 
@@ -61,18 +69,22 @@ Build a public MVP (potential startup) that:
 
 # 🧠 Architecture
 
-* Modular Monolith
-* No microservices (MVP phase)
-* No Kafka (MVP phase)
-* Clear separation between ingestion, domain, and API layers
+**Architecture style:** Modular Monolith
 
-### Package structure (high-level)
+Reasons:
 
-```id="xwe5g3"
+* Simpler deployment for MVP
+* Easier local development
+* Clear separation of responsibilities
+* Can be split into microservices later if needed
+
+### High-level modules
+
+```text
 ingestion/
   auth/        -> OAuth2 token retrieval & caching
   fetch/       -> External API clients (Fuel Finder)
-  normalize/   -> Data normalization
+  normalize/   -> Data normalization (external → domain)
   service/     -> Ingestion orchestration
 
 domain/
@@ -87,13 +99,15 @@ api/
 config/
 ```
 
-Principles:
+### Architectural principles
 
-* Keep it simple
-* Focus on correctness
-* Idempotent ingestion
+* Clear separation between ingestion, domain, and API layers
+* Idempotent ingestion pipeline
 * Append-only historical data
-* Avoid premature complexity
+* Raw data audit trail
+* External API treated as unreliable source
+* Read-optimized models for API
+* Avoid premature microservices
 * Design for scalability from day one
 
 ---
@@ -102,44 +116,53 @@ Principles:
 
 The UK Fuel Finder API is accessed using **OAuth2 Client Credentials flow**.
 
-Flow:
+### Integration flow
 
-1. Request access token using client_id and client_secret
+1. Request access token using `client_id` and `client_secret`
 2. Cache token in memory until expiration
 3. Use Bearer token to call Fuel Finder endpoints
 4. Fetch data in batches
 5. Store raw payload for audit
 6. Normalize and persist data
 
-OAuth components:
+### OAuth components
 
-* `OAuthTokenClient` → Calls `/oauth/generate_access_token`
-* `FuelFinderTokenProvider` → Token caching & refresh
-* `FuelFinderWebClientConfig` → WebClient configuration
-* `FuelFinderApiProperties` → External API configuration
+| Component                    | Responsibility                       |
+| ---------------------------- | ------------------------------------ |
+| `OAuthTokenClient`           | Calls `/oauth/generate_access_token` |
+| `FuelFinderTokenProvider`    | Token caching & refresh              |
+| `FuelFinderWebClientConfig`  | WebClient configuration              |
+| `FuelFinderApiProperties`    | External API configuration           |
+| `FuelFinderPfsClient`        | Fetch stations                       |
+| `FuelFinderFuelPricesClient` | Fetch fuel prices                    |
 
-This design avoids requesting a token on every API call and simulates production-grade API integration patterns.
+This design simulates **production-grade external API integration** with token caching and error handling.
 
 ---
 
 # 📊 Data Model
 
-Core entities:
+Core tables:
 
-* **retailer** → data source
-* **raw_feed_fetch** → raw JSON + audit trail
-* **station** → fuel station with geo location
-* **price_observation** → append-only price history
-* **latest_price** → read model for fast queries
+| Table               | Purpose                        |
+| ------------------- | ------------------------------ |
+| `retailer`          | Data source                    |
+| `raw_feed_fetch`    | Raw JSON + audit trail         |
+| `station`           | Fuel station with geo location |
+| `price_observation` | Append-only price history      |
+| `latest_price`      | Read model for fast queries    |
 
-Key design decisions:
+### Key design decisions
 
-* Append-only price model
+* **Append-only** price model (no updates, only inserts)
 * `observed_at` = ingestion time (source of truth)
 * Feed timestamps are not trusted
 * DB-level deduplication via `source_hash`
 * PostGIS `geography(Point,4326)` for geo queries
 * Full auditability of external data
+* Separation between **write model** and **read model**
+
+This approach is commonly used in **data platforms and event-style systems**.
 
 ---
 
@@ -147,14 +170,27 @@ Key design decisions:
 
 End-to-end ingestion flow:
 
-1. Fetch data from Fuel Finder API
-2. Store raw payload (`raw_feed_fetch`)
-3. Parse & normalize data
-4. Upsert stations
-5. Insert price observations (idempotent)
-6. Update `latest_price`
+```text
+OAuth Token
+    ↓
+Fetch Stations (PFS)
+    ↓
+Fetch Fuel Prices
+    ↓
+Store RAW JSON (raw_feed_fetch)
+    ↓
+Normalize data
+    ↓
+Upsert station
+    ↓
+Insert price_observation (append-only)
+    ↓
+Update latest_price (read model)
+    ↓
+Expose Geo API
+```
 
-Guarantees:
+### Pipeline guarantees
 
 * Idempotent ingestion
 * Full audit trail
@@ -162,6 +198,7 @@ Guarantees:
 * Historical data preserved
 * Safe reprocessing of feeds
 * Source traceability
+* Replay capability from raw data
 
 ---
 
@@ -169,24 +206,32 @@ Guarantees:
 
 ## Nearby stations
 
-```id="6z4w1p"
+```http
 GET /v1/stations/nearby?lat=&lon=&radiusMeters=&fuelType=&sort=price|distance
 ```
 
 Returns:
 
-* station id, brand, address, postcode
+* station id
+* brand
+* address
+* postcode
 * lat/lon
 * distance_meters
 * fuel_type
 * price_pence
 * observed_at
 
+Uses PostGIS:
+
+* `ST_DWithin`
+* `ST_Distance`
+
 ---
 
 ## Station detail
 
-```id="n9w7ho"
+```http
 GET /v1/stations/{id}
 ```
 
@@ -194,7 +239,7 @@ GET /v1/stations/{id}
 
 ## Price history
 
-```id="i0p7ks"
+```http
 GET /v1/stations/{id}/prices?fuelType=&from=&to=&page=
 ```
 
@@ -216,60 +261,58 @@ GET /v1/stations/{id}/prices?fuelType=&from=&to=&page=
 * External API configuration
 * WebClient integration
 * Structured logging for ingestion
+* Fetch stations (PFS)
+* Fetch fuel prices
 
 ---
 
-## 🚧 In Progress
+## 🚧 In Progress — Ingestion Pipeline
 
-Step 5 — Ingestion pipeline
-
-* OAuth token retrieval
-* Call Fuel Finder API
-* Fetch fuel stations (PFS)
-* Fetch fuel prices
-* Store raw payload
+* Store raw payload (`raw_feed_fetch`)
 * Normalize stations and prices
 * Upsert stations
 * Insert deduplicated price observations
-* Update latest_price
+* Update latest_price read model
 
 ---
 
 ## ⏭️ Next Steps
 
-Step 6 — Scheduler
+### Step 6 — Raw Data Storage
+
+* Store raw API responses
+* Source hashing
+* Audit trail
+
+### Step 7 — Scheduler
 
 * Periodic ingestion
 * DB locking (ShedLock)
 
-Step 7 — Geo API
+### Step 8 — Geo API
 
 * `/v1/stations/nearby`
-* PostGIS queries (`ST_DWithin`, `ST_Distance`)
+* PostGIS queries
 
-Step 8 — Station APIs
+### Step 9 — Station APIs
 
 * Station detail
 * Price history
 
-Step 9 — Testing
+### Step 10 — Testing
 
 * Parsing tests
 * Deduplication tests
 * Integration tests
 * Testcontainers
 
-Step 10 — Documentation
+### Step 11 — Documentation
 
-* ADRs
-* API docs
-* Data model docs
+* ADRs (Architecture Decision Records)
+* API documentation
+* Data model documentation
 
-Step 11 — Client
-
-* Android (Kotlin) or PWA
-
-Step 12 — Cloud
+### Step 12 — Cloud Deployment
 
 * AWS deployment
 * Terraform
@@ -282,20 +325,20 @@ Step 12 — Cloud
 
 Start database:
 
-```id="v8w4s0"
+```bash
 docker compose up -d
 ```
 
 Run backend:
 
-```id="v8qk9n"
+```bash
 cd backend
 ./gradlew bootRun
 ```
 
 Health check:
 
-```id="q5r0c1"
+```bash
 http://localhost:8080/actuator/health
 ```
 
@@ -305,14 +348,14 @@ http://localhost:8080/actuator/health
 
 Fuel Finder API requires OAuth credentials:
 
-```id="u4z7ks"
+```bash
 FUEL_FINDER_CLIENT_ID=your_client_id
 FUEL_FINDER_CLIENT_SECRET=your_client_secret
 ```
 
-These are loaded via:
+Loaded via:
 
-```id="2q5p0l"
+```text
 application-local.yml
 application-prod.yml
 ```
@@ -323,19 +366,20 @@ application-prod.yml
 
 This project demonstrates:
 
-* Real-world data ingestion pipelines
-* OAuth2 API integration
-* External API resilience patterns
+* External API integration with OAuth2
 * Token caching strategies
-* Geospatial querying with PostGIS
-* Append-only data modeling
+* Resilient API client design
+* Data ingestion pipelines
 * Idempotent processing
-* Clean backend architecture
-* Production-style logging and configuration
-* Infrastructure with Docker
+* Append-only data modeling
+* Geospatial queries with PostGIS
+* Read model vs write model separation
+* Structured logging and observability
+* Docker-based infrastructure
 * Database migrations with Flyway
+* Clean backend architecture
 
-This is not a tutorial project — it is designed to simulate a **production-ready backend system**.
+This is **not a tutorial CRUD project** — it is designed to simulate a **production-ready backend ingestion and geospatial data platform**.
 
 ---
 
@@ -349,4 +393,6 @@ Java • Spring Boot • PostgreSQL • PostGIS • Docker • AWS
 
 # 📄 License
 
-MVP project for educational and portfolio purposes.
+MVP project for educational, portfolio, and experimental purposes.
+
+---
