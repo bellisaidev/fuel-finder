@@ -4,7 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
-import uk.co.fuelfinder.ingestion.auth.FuelFinderApiProperties;
+import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderApiProperties;
 
 @Configuration
 public class FuelFinderWebClientConfig {
