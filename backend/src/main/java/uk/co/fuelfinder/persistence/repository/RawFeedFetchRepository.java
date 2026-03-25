@@ -5,4 +5,5 @@ import uk.co.fuelfinder.persistence.entity.RawFeedFetchEntity;
 
 import java.util.UUID;
 
-public interface RawFeedFetchRepository extends JpaRepository<RawFeedFetchEntity, UUID> {}
+public interface RawFeedFetchRepository extends JpaRepository<RawFeedFetchEntity, UUID> {
+}

@@ -1,5 +1,8 @@
+create extension if not exists "pgcrypto";
+
 create table raw_feed_fetch (
-    id bigserial primary key,
+    id uuid primary key default gen_random_uuid(),
+    retailer_id uuid not null references retailer(id),
     feed_type varchar(50) not null,
     endpoint_path varchar(255) not null,
     batch_number integer not null,
@@ -17,3 +20,6 @@ create index idx_raw_feed_fetch_source_hash
 
 create index idx_raw_feed_fetch_batch_number
     on raw_feed_fetch (batch_number);
+
+create index idx_raw_feed_fetch_retailer_id
+    on raw_feed_fetch (retailer_id);
