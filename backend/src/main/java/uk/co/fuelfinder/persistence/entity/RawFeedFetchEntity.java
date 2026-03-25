@@ -1,23 +1,11 @@
 package uk.co.fuelfinder.persistence.entity;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import jakarta.persistence.*;
+import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import uk.co.fuelfinder.ingestion.raw.FeedType;
-import uk.co.fuelfinder.persistence.converter.JsonNodeConverter;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -39,11 +27,11 @@ public class RawFeedFetchEntity {
     @JoinColumn(name = "retailer_id", nullable = false)
     private RetailerEntity retailer;
 
+    @Column(name = "feed_type", nullable = false)
     @Enumerated(EnumType.STRING)
-    @Column(name = "feed_type", nullable = false, length = 50)
     private FeedType feedType;
 
-    @Column(name = "endpoint_path", nullable = false, length = 255)
+    @Column(name = "endpoint_path", nullable = false)
     private String endpointPath;
 
     @Column(name = "batch_number", nullable = false)
@@ -55,10 +43,10 @@ public class RawFeedFetchEntity {
     @Column(name = "record_count", nullable = false)
     private int recordCount;
 
-    @Column(name = "source_hash", nullable = false, length = 64)
+    @Column(name = "source_hash", nullable = false)
     private String sourceHash;
 
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(name = "raw_json", nullable = false, columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "raw_json", columnDefinition = "jsonb", nullable = false)
     private JsonNode rawJson;
 }

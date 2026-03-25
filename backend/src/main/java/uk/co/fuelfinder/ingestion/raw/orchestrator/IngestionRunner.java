@@ -4,74 +4,52 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
-import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderApiProperties;
-import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderTokenProvider;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderAuthenticationException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderConnectivityException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
-import uk.co.fuelfinder.ingestion.raw.client.FuelFinderFuelPricesClient;
-import uk.co.fuelfinder.ingestion.raw.client.FuelFinderPfsClient;
-import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
-import uk.co.fuelfinder.ingestion.raw.client.dto.PfsStationDto;
-
-import java.util.List;
+import uk.co.fuelfinder.persistence.entity.RetailerEntity;
+import uk.co.fuelfinder.persistence.repository.RetailerRepository;
 
 @Slf4j
 @Component
 @Profile("local")
 public class IngestionRunner implements CommandLineRunner {
 
-    private final FuelFinderApiProperties properties;
-    private final FuelFinderTokenProvider tokenProvider;
-    private final FuelFinderPfsClient pfsClient;
-    private final FuelFinderFuelPricesClient fuelPricesClient;
+    private static final String FUEL_FINDER_RETAILER_NAME = "FUEL_FINDER_API";
+
+    private final RetailerRepository retailerRepository;
+    private final RetailerIngestionService retailerIngestionService;
 
     public IngestionRunner(
-            FuelFinderApiProperties properties,
-            FuelFinderTokenProvider tokenProvider,
-            FuelFinderPfsClient pfsClient,
-            FuelFinderFuelPricesClient fuelPricesClient
+            RetailerRepository retailerRepository,
+            RetailerIngestionService retailerIngestionService
     ) {
-        this.properties = properties;
-        this.tokenProvider = tokenProvider;
-        this.pfsClient = pfsClient;
-        this.fuelPricesClient = fuelPricesClient;
+        this.retailerRepository = retailerRepository;
+        this.retailerIngestionService = retailerIngestionService;
     }
 
     @Override
     public void run(String... args) {
-        log.info("Fuel Finder baseUrl={}", properties.getBaseUrl());
-        log.info("Fuel Finder tokenPath={}", properties.getOauth().getTokenPath());
-        log.info("Fuel Finder clientIdPresent={}", properties.getOauth().getClientId() != null);
-
         try {
-            String accessToken = tokenProvider.getAccessToken();
-            log.info("Fuel Finder access token acquired successfully: present={}",
-                    accessToken != null && !accessToken.isBlank());
+            RetailerEntity retailer = retailerRepository.findByName(FUEL_FINDER_RETAILER_NAME)
+                    .orElseThrow(() -> new FuelFinderIntegrationException(
+                            "Retailer not found: " + FUEL_FINDER_RETAILER_NAME
+                    ));
 
-            // ---- PFS stations ----
-            List<PfsStationDto> stations = pfsClient.fetchBatch(1);
-            log.info("Fuel Finder PFS stations fetched: {}", stations.size());
+            RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
 
-            if (!stations.isEmpty()) {
-                PfsStationDto first = stations.get(0);
-                log.info("Fuel Finder sample station: nodeId={}, tradingName={}, brandName={}",
-                        first.nodeId(),
-                        first.tradingName(),
-                        first.brandName());
-            }
-
-            // ---- Fuel prices ----
-            List<FuelPricesStationDto> fuelPricesStations = fuelPricesClient.fetchFuelPrices(1);
-            log.info("Fuel Finder fuel prices stations fetched: {}", fuelPricesStations.size());
-
-            if (!fuelPricesStations.isEmpty()) {
-                FuelPricesStationDto first = fuelPricesStations.get(0);
-                log.info("Fuel Finder sample fuel prices station: nodeId={}, tradingName={}, pricesCount={}",
-                        first.nodeId(),
-                        first.tradingName(),
-                        first.fuelPrices() == null ? 0 : first.fuelPrices().size());
-            }
+            log.info(
+                    "Raw ingestion finished: success={}, retailer={}, pfsBatchNumber={}, pfsRecordCount={}, pfsRawFeedFetchId={}, fuelPricesBatchNumber={}, fuelPricesRecordCount={}, fuelPricesRawFeedFetchId={}, failureReason={}",
+                    summary.isSuccess(),
+                    summary.getRetailerName(),
+                    summary.getPfsBatchNumber(),
+                    summary.getPfsRecordCount(),
+                    summary.getPfsRawFeedFetchId(),
+                    summary.getFuelPricesBatchNumber(),
+                    summary.getFuelPricesRecordCount(),
+                    summary.getFuelPricesRawFeedFetchId(),
+                    summary.getFailureReason()
+            );
 
         } catch (FuelFinderConnectivityException e) {
             log.warn("Fuel Finder connectivity issue: {}. Is VPN enabled?", e.getMessage());
