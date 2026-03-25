@@ -15,6 +15,7 @@ import uk.co.fuelfinder.persistence.entity.RetailerEntity;
 import uk.co.fuelfinder.persistence.repository.RawFeedFetchRepository;
 
 import java.time.OffsetDateTime;
+import java.util.Objects;
 import java.util.UUID;
 
 @Slf4j
@@ -80,13 +81,9 @@ public class RawFeedStorageService {
             Object payload,
             int recordCount
     ) {
-        if (retailer == null) {
-            throw new FuelFinderInvalidResponseException("Retailer cannot be null when storing raw feed");
-        }
-
-        if (feedType == null) {
-            throw new FuelFinderInvalidResponseException("Feed type cannot be null when storing raw feed");
-        }
+        Objects.requireNonNull(retailer, "Retailer cannot be null when storing raw feed");
+        Objects.requireNonNull(feedType, "Feed type cannot be null when storing raw feed");
+        Objects.requireNonNull(payload, "Raw payload cannot be null when storing raw feed");
 
         if (endpointPath == null || endpointPath.isBlank()) {
             throw new FuelFinderInvalidResponseException("Endpoint path cannot be null or blank when storing raw feed");
@@ -94,10 +91,6 @@ public class RawFeedStorageService {
 
         if (batchNumber < 1) {
             throw new FuelFinderInvalidResponseException("Batch number must be greater than zero");
-        }
-
-        if (payload == null) {
-            throw new FuelFinderInvalidResponseException("Raw payload cannot be null");
         }
 
         if (recordCount < 0) {
