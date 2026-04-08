@@ -16,6 +16,7 @@ import uk.co.fuelfinder.persistence.entity.RawFeedFetchEntity;
 import uk.co.fuelfinder.persistence.entity.RetailerEntity;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -24,6 +25,8 @@ import java.util.List;
 public class RetailerIngestionService {
 
     private static final int DEFAULT_BATCH_NUMBER = 1;
+    private static final int PAGE_SIZE = 500;
+
     private static final String PFS_ENDPOINT_PATH = "/pfs";
     private static final String FUEL_PRICES_ENDPOINT_PATH = "/pfs/fuel-prices";
 
@@ -40,43 +43,33 @@ public class RetailerIngestionService {
         log.info("Starting ingestion for retailer={}", retailerName);
 
         try {
-            int pfsBatchNumber = DEFAULT_BATCH_NUMBER;
-            List<PfsStationDto> pfsStations = pfsClient.fetchBatch(pfsBatchNumber);
-
-            log.info(
-                    "Fetched PFS batch {} for retailer={}: {} stations",
-                    pfsBatchNumber,
-                    retailerName,
-                    pfsStations.size()
-            );
+            PagedFetchResult<PfsStationDto> pfsResult = fetchAllPfsStations(retailerName);
+            List<PfsStationDto> pfsStations = pfsResult.records();
 
             RawFeedFetchEntity pfsRawFeed = rawFeedStorageService.store(
                     retailer,
                     FeedType.PFS,
                     PFS_ENDPOINT_PATH,
-                    pfsBatchNumber,
+                    DEFAULT_BATCH_NUMBER,
                     pfsStations,
                     pfsStations.size()
             );
 
             int stationUpserts = normalizeAndUpsertStations(retailer, pfsStations);
-            log.info("Station normalization completed for retailer={}: stationUpserts={}", retailerName, stationUpserts);
-
-            int fuelPricesBatchNumber = DEFAULT_BATCH_NUMBER;
-            List<FuelPricesStationDto> fuelPricesStations = fuelPricesClient.fetchFuelPrices(fuelPricesBatchNumber);
-
             log.info(
-                    "Fetched fuel prices batch {} for retailer={}: {} stations",
-                    fuelPricesBatchNumber,
+                    "Station normalization completed for retailer={}: stationUpserts={}",
                     retailerName,
-                    fuelPricesStations.size()
+                    stationUpserts
             );
+
+            PagedFetchResult<FuelPricesStationDto> fuelPricesResult = fetchAllFuelPrices(retailerName);
+            List<FuelPricesStationDto> fuelPricesStations = fuelPricesResult.records();
 
             RawFeedFetchEntity fuelPricesRawFeed = rawFeedStorageService.store(
                     retailer,
                     FeedType.FUEL_PRICES,
                     FUEL_PRICES_ENDPOINT_PATH,
-                    fuelPricesBatchNumber,
+                    DEFAULT_BATCH_NUMBER,
                     fuelPricesStations,
                     fuelPricesStations.size()
             );
@@ -84,19 +77,21 @@ public class RetailerIngestionService {
             RawIngestionSummary summary = RawIngestionSummary.success(
                     retailerName,
                     startedAt,
-                    pfsBatchNumber,
+                    DEFAULT_BATCH_NUMBER,
                     pfsStations.size(),
                     pfsRawFeed.getId(),
-                    fuelPricesBatchNumber,
+                    DEFAULT_BATCH_NUMBER,
                     fuelPricesStations.size(),
                     fuelPricesRawFeed.getId()
             );
 
             log.info(
-                    "Completed ingestion for retailer={}: pfsRecordCount={}, fuelPricesRecordCount={}, stationUpserts={}, pfsRawFeedFetchId={}, fuelPricesRawFeedFetchId={}",
+                    "Completed ingestion for retailer={}: pfsRecordCount={}, pfsBatchCount={}, fuelPricesRecordCount={}, fuelPricesBatchCount={}, stationUpserts={}, pfsRawFeedFetchId={}, fuelPricesRawFeedFetchId={}",
                     retailerName,
                     summary.getPfsRecordCount(),
+                    pfsResult.batchCount(),
                     summary.getFuelPricesRecordCount(),
+                    fuelPricesResult.batchCount(),
                     stationUpserts,
                     summary.getPfsRawFeedFetchId(),
                     summary.getFuelPricesRawFeedFetchId()
@@ -115,6 +110,84 @@ public class RetailerIngestionService {
         }
     }
 
+    private PagedFetchResult<PfsStationDto> fetchAllPfsStations(String retailerName) {
+        List<PfsStationDto> allStations = new ArrayList<>();
+        int batchNumber = DEFAULT_BATCH_NUMBER;
+        int batchCount = 0;
+
+        while (true) {
+            List<PfsStationDto> batch = pfsClient.fetchBatch(batchNumber);
+
+            log.info(
+                    "Fetched PFS batch {} for retailer={}: {} stations",
+                    batchNumber,
+                    retailerName,
+                    batch.size()
+            );
+
+            if (batch.isEmpty()) {
+                break;
+            }
+
+            allStations.addAll(batch);
+            batchCount++;
+
+            if (batch.size() < PAGE_SIZE) {
+                break;
+            }
+
+            batchNumber++;
+        }
+
+        log.info(
+                "Fetched all PFS batches for retailer={}: totalStations={}, batchCount={}",
+                retailerName,
+                allStations.size(),
+                batchCount
+        );
+
+        return new PagedFetchResult<>(allStations, batchCount);
+    }
+
+    private PagedFetchResult<FuelPricesStationDto> fetchAllFuelPrices(String retailerName) {
+        List<FuelPricesStationDto> allFuelPricesStations = new ArrayList<>();
+        int batchNumber = DEFAULT_BATCH_NUMBER;
+        int batchCount = 0;
+
+        while (true) {
+            List<FuelPricesStationDto> batch = fuelPricesClient.fetchFuelPrices(batchNumber);
+
+            log.info(
+                    "Fetched fuel prices batch {} for retailer={}: {} stations",
+                    batchNumber,
+                    retailerName,
+                    batch.size()
+            );
+
+            if (batch.isEmpty()) {
+                break;
+            }
+
+            allFuelPricesStations.addAll(batch);
+            batchCount++;
+
+            if (batch.size() < PAGE_SIZE) {
+                break;
+            }
+
+            batchNumber++;
+        }
+
+        log.info(
+                "Fetched all fuel prices batches for retailer={}: totalStations={}, batchCount={}",
+                retailerName,
+                allFuelPricesStations.size(),
+                batchCount
+        );
+
+        return new PagedFetchResult<>(allFuelPricesStations, batchCount);
+    }
+
     private int normalizeAndUpsertStations(RetailerEntity retailer, List<PfsStationDto> pfsStations) {
         int stationUpserts = 0;
 
@@ -124,5 +197,11 @@ public class RetailerIngestionService {
         }
 
         return stationUpserts;
+    }
+
+    private record PagedFetchResult<T>(
+            List<T> records,
+            int batchCount
+    ) {
     }
 }
