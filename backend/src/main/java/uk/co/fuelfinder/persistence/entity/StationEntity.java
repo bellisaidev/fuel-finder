@@ -1,9 +1,7 @@
 package uk.co.fuelfinder.persistence.entity;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 import org.locationtech.jts.geom.Point;
 
 import java.time.OffsetDateTime;
@@ -12,6 +10,8 @@ import java.util.UUID;
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 @Entity
 @Table(
         name = "station",
