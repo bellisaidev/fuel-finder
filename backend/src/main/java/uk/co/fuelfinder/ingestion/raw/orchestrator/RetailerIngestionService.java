@@ -3,7 +3,9 @@ package uk.co.fuelfinder.ingestion.raw.orchestrator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
+import uk.co.fuelfinder.ingestion.normalize.NormalizedStation;
+import uk.co.fuelfinder.ingestion.normalize.PfsStationNormalizer;
+import uk.co.fuelfinder.ingestion.normalize.StationUpsertService;
 import uk.co.fuelfinder.ingestion.raw.FeedType;
 import uk.co.fuelfinder.ingestion.raw.client.FuelFinderFuelPricesClient;
 import uk.co.fuelfinder.ingestion.raw.client.FuelFinderPfsClient;
@@ -28,12 +30,14 @@ public class RetailerIngestionService {
     private final FuelFinderPfsClient pfsClient;
     private final FuelFinderFuelPricesClient fuelPricesClient;
     private final RawFeedStorageService rawFeedStorageService;
+    private final PfsStationNormalizer pfsStationNormalizer;
+    private final StationUpsertService stationUpsertService;
 
     public RawIngestionSummary ingest(RetailerEntity retailer) {
         Instant startedAt = Instant.now();
         String retailerName = retailer.getName();
 
-        log.info("Starting raw ingestion for retailer={}", retailerName);
+        log.info("Starting ingestion for retailer={}", retailerName);
 
         try {
             int pfsBatchNumber = DEFAULT_BATCH_NUMBER;
@@ -54,6 +58,9 @@ public class RetailerIngestionService {
                     pfsStations,
                     pfsStations.size()
             );
+
+            int stationUpserts = normalizeAndUpsertStations(retailer, pfsStations);
+            log.info("Station normalization completed for retailer={}: stationUpserts={}", retailerName, stationUpserts);
 
             int fuelPricesBatchNumber = DEFAULT_BATCH_NUMBER;
             List<FuelPricesStationDto> fuelPricesStations = fuelPricesClient.fetchFuelPrices(fuelPricesBatchNumber);
@@ -86,10 +93,11 @@ public class RetailerIngestionService {
             );
 
             log.info(
-                    "Completed raw ingestion for retailer={}: pfsRecordCount={}, fuelPricesRecordCount={}, pfsRawFeedFetchId={}, fuelPricesRawFeedFetchId={}",
+                    "Completed ingestion for retailer={}: pfsRecordCount={}, fuelPricesRecordCount={}, stationUpserts={}, pfsRawFeedFetchId={}, fuelPricesRawFeedFetchId={}",
                     retailerName,
                     summary.getPfsRecordCount(),
                     summary.getFuelPricesRecordCount(),
+                    stationUpserts,
                     summary.getPfsRawFeedFetchId(),
                     summary.getFuelPricesRawFeedFetchId()
             );
@@ -97,7 +105,7 @@ public class RetailerIngestionService {
             return summary;
 
         } catch (Exception e) {
-            log.error("Raw ingestion failed for retailer={}: {}", retailerName, e.getMessage(), e);
+            log.error("Ingestion failed for retailer={}: {}", retailerName, e.getMessage(), e);
 
             return RawIngestionSummary.failed(
                     retailerName,
@@ -105,5 +113,16 @@ public class RetailerIngestionService {
                     e.getMessage() == null ? "Unknown ingestion error" : e.getMessage()
             );
         }
+    }
+
+    private int normalizeAndUpsertStations(RetailerEntity retailer, List<PfsStationDto> pfsStations) {
+        int stationUpserts = 0;
+
+        for (PfsStationDto dto : pfsStations) {
+            NormalizedStation normalizedStation = pfsStationNormalizer.normalize(dto);
+            stationUpserts += stationUpsertService.upsert(retailer, normalizedStation);
+        }
+
+        return stationUpserts;
     }
 }

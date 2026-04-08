@@ -7,5 +7,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface StationRepository extends JpaRepository<StationEntity, UUID> {
-    Optional<StationEntity> findByRetailer_IdAndSiteId(UUID retailerId, String siteId);
+
+    Optional<StationEntity> findByRetailerIdAndSiteId(UUID retailerId, String siteId);
 }
