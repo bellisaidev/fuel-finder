@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import uk.co.fuelfinder.common.HashingUtils;
+import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
 import uk.co.fuelfinder.persistence.entity.PriceObservationEntity;
 import uk.co.fuelfinder.persistence.entity.RawFeedFetchEntity;
 import uk.co.fuelfinder.persistence.entity.RetailerEntity;
@@ -32,22 +33,23 @@ public class PriceObservationIngestionService {
     public int ingest(
             RetailerEntity retailer,
             RawFeedFetchEntity rawFeedFetch,
-            List<?> fuelPricesStations
+            List<FuelPricesStationDto> fuelPricesStations
     ) {
         validateInput(retailer, rawFeedFetch, fuelPricesStations);
 
         int inserted = 0;
+        int skippedMissingStation = 0;
+        int skippedDuplicate = 0;
 
-        for (Object item : fuelPricesStations) {
-            @SuppressWarnings("unchecked")
-            List<NormalizedPriceObservation> normalizedObservations =
-                    fuelPricesNormalizer.normalize((uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto) item);
+        for (FuelPricesStationDto stationDto : fuelPricesStations) {
+            List<NormalizedPriceObservation> normalizedObservations = fuelPricesNormalizer.normalize(stationDto);
 
             for (NormalizedPriceObservation normalized : normalizedObservations) {
                 StationEntity station = stationRepository.findByRetailerAndSiteId(retailer, normalized.getSiteId())
                         .orElse(null);
 
                 if (station == null) {
+                    skippedMissingStation++;
                     log.warn(
                             "Skipping price observation because station was not found: retailer={}, siteId={}, fuelType={}",
                             retailer.getName(),
@@ -61,11 +63,11 @@ public class PriceObservationIngestionService {
                         retailer.getId(),
                         normalized.getSiteId(),
                         normalized.getFuelType(),
-                        normalized.getPrice().toPlainString(),
-                        rawFeedFetch.getId()
+                        normalized.getPrice().toPlainString()
                 );
 
                 if (priceObservationRepository.existsBySourceHash(sourceHash)) {
+                    skippedDuplicate++;
                     continue;
                 }
 
@@ -86,10 +88,12 @@ public class PriceObservationIngestionService {
         }
 
         log.info(
-                "Price observation ingestion completed: retailer={}, rawFeedFetchId={}, inserted={}",
+                "Price observation ingestion completed: retailer={}, rawFeedFetchId={}, inserted={}, skippedDuplicate={}, skippedMissingStation={}",
                 retailer.getName(),
                 rawFeedFetch.getId(),
-                inserted
+                inserted,
+                skippedDuplicate,
+                skippedMissingStation
         );
 
         return inserted;
@@ -99,15 +103,13 @@ public class PriceObservationIngestionService {
             UUID retailerId,
             String siteId,
             String fuelType,
-            String price,
-            UUID rawFeedFetchId
+            String price
     ) {
-        String fingerprint = "%s|%s|%s|%s|%s".formatted(
+        String fingerprint = "%s|%s|%s|%s".formatted(
                 retailerId,
                 siteId,
                 fuelType,
-                price,
-                rawFeedFetchId
+                price
         );
 
         return HashingUtils.sha256(fingerprint);
@@ -116,7 +118,7 @@ public class PriceObservationIngestionService {
     private void validateInput(
             RetailerEntity retailer,
             RawFeedFetchEntity rawFeedFetch,
-            List<?> fuelPricesStations
+            List<FuelPricesStationDto> fuelPricesStations
     ) {
         if (retailer == null) {
             throw new IllegalArgumentException("Retailer cannot be null");
