@@ -1,17 +1,17 @@
 package uk.co.fuelfinder.persistence.entity;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Getter
 @Setter
+@AllArgsConstructor
 @NoArgsConstructor
 @Entity
+@Builder
 @Table(name = "price_observation",
         indexes = {
                 @Index(name = "idx_price_obs_station_fuel_observed", columnList = "station_id,fuel_type,observed_at"),
@@ -34,6 +34,7 @@ public class PriceObservationEntity {
     @Column(name = "price_pence", nullable = false)
     private int pricePence;
 
+    @Builder.Default
     @Column(name = "currency", nullable = false)
     private String currency = "GBP";
 

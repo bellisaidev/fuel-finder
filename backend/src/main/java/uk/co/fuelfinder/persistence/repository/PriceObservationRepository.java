@@ -5,4 +5,8 @@ import uk.co.fuelfinder.persistence.entity.PriceObservationEntity;
 
 import java.util.UUID;
 
-public interface PriceObservationRepository extends JpaRepository<PriceObservationEntity, UUID> {}
+public interface PriceObservationRepository extends JpaRepository<PriceObservationEntity, UUID> {
+
+    boolean existsBySourceHash(String sourceHash);
+
+}

@@ -1,6 +1,7 @@
 package uk.co.fuelfinder.persistence.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import uk.co.fuelfinder.persistence.entity.RetailerEntity;
 import uk.co.fuelfinder.persistence.entity.StationEntity;
 
 import java.util.Optional;
@@ -9,4 +10,7 @@ import java.util.UUID;
 public interface StationRepository extends JpaRepository<StationEntity, UUID> {
 
     Optional<StationEntity> findByRetailerIdAndSiteId(UUID retailerId, String siteId);
+
+    Optional<StationEntity> findByRetailerAndSiteId(RetailerEntity retailer, String siteId);
+
 }
