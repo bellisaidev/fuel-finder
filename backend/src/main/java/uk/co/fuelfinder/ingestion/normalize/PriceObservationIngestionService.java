@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import uk.co.fuelfinder.common.HashingUtils;
+import uk.co.fuelfinder.common.PriceUtils;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
 import uk.co.fuelfinder.persistence.entity.PriceObservationEntity;
 import uk.co.fuelfinder.persistence.entity.RawFeedFetchEntity;
@@ -12,8 +13,6 @@ import uk.co.fuelfinder.persistence.entity.RetailerEntity;
 import uk.co.fuelfinder.persistence.entity.StationEntity;
 import uk.co.fuelfinder.persistence.repository.PriceObservationRepository;
 import uk.co.fuelfinder.persistence.repository.StationRepository;
-
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -28,6 +27,7 @@ public class PriceObservationIngestionService {
     private final FuelPricesNormalizer fuelPricesNormalizer;
     private final StationRepository stationRepository;
     private final PriceObservationRepository priceObservationRepository;
+    private final LatestPriceProjectionService latestPriceProjectionService;
 
     @Transactional
     public int ingest(
@@ -75,14 +75,15 @@ public class PriceObservationIngestionService {
                         .id(UUID.randomUUID())
                         .station(station)
                         .fuelType(normalized.getFuelType())
-                        .pricePence(toPence(normalized.getPrice()))
+                        .pricePence(PriceUtils.toPence(normalized.getPrice()))
                         .currency(DEFAULT_CURRENCY)
                         .observedAt(OffsetDateTime.now())
                         .sourceHash(sourceHash)
                         .rawPayload(rawFeedFetch)
                         .build();
 
-                priceObservationRepository.save(entity);
+                PriceObservationEntity saved = priceObservationRepository.save(entity);
+                latestPriceProjectionService.upsertFromObservation(saved);
                 inserted++;
             }
         }
@@ -131,12 +132,5 @@ public class PriceObservationIngestionService {
         if (fuelPricesStations == null) {
             throw new IllegalArgumentException("Fuel prices stations cannot be null");
         }
-    }
-
-    private int toPence(BigDecimal price) {
-        return price
-                .multiply(BigDecimal.valueOf(100))
-                .setScale(0, java.math.RoundingMode.HALF_UP)
-                .intValueExact();
     }
 }
