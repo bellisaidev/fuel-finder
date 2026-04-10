@@ -323,6 +323,8 @@ GET /v1/stations/{id}/prices?fuelType=&from=&to=&page=
 
 # ⚙️ Running Locally
 
+Create a local `.env` file from `.env.example` before starting Docker. Keep `.env` untracked and use only placeholder values in committed files.
+
 Start database:
 
 ```bash
@@ -359,6 +361,8 @@ Loaded via:
 application-local.yml
 application-prod.yml
 ```
+
+Local Docker database settings are read from `.env`. Commit `.env.example`, never `.env`.
 
 ---
 
