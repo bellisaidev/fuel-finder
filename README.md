@@ -15,14 +15,16 @@ What is implemented today:
 - Paginated retrieval of PFS and fuel price feeds
 - Raw feed persistence for auditability
 - Station normalization and upsert flow
-- Initial persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
+- Fuel price normalization, deduplicated observation ingestion, and latest price projection/backfill
+- Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
+- Unit tests with JUnit 5 and Mockito for ingestion orchestration and price observation ingestion
+- Integration tests with Testcontainers for end-to-end ingestion and deduplication flows
 
 What is still in progress:
 
-- Full price normalization and write pipeline alignment
-- Read model completion for latest prices
 - REST API endpoints for nearby stations and price history
-- Stronger automated integration coverage
+- Broader integration coverage across more components and failure scenarios
+- Cleanup or consolidation of alternative JDBC write paths that are not part of the active ingestion flow
 
 ## Tech Stack
 
@@ -49,8 +51,8 @@ Main areas:
 - `ingestion/raw/auth/`: Fuel Finder API properties, OAuth clients, token management
 - `ingestion/raw/client/`: external feed clients and DTOs
 - `ingestion/raw/orchestrator/`: ingestion coordination
-- `ingestion/raw/writer/`: raw payload storage and JDBC-based writes
-- `ingestion/normalize/`: station normalization and upsert logic
+- `ingestion/raw/writer/`: raw payload storage plus experimental/alternative JDBC write helpers
+- `ingestion/normalize/`: station normalization, price normalization, observation ingestion, and latest price projection
 - `persistence/entity/`: JPA entities
 - `persistence/repository/`: Spring Data repositories
 
@@ -159,6 +161,43 @@ http://localhost:8080/actuator/health
 - Production-specific API settings live in [`backend/src/main/resources/application-prod.yml`](backend/src/main/resources/application-prod.yml)
 - `.env` is local-only and should never be committed
 
+## Testing
+
+The backend includes unit and integration tests based on Spring Boot Test, JUnit 5, Mockito, and Testcontainers.
+
+Recently added coverage includes:
+
+- `RetailerIngestionService`: happy path, paginated fetch flow, downstream service invocation, and failure handling
+- `PriceObservationIngestionService`: observation insert, duplicate skip, missing-station skip, and input validation
+- `RetailerIngestionServiceIT`: end-to-end ingestion with real PostgreSQL/PostGIS persistence through Testcontainers
+- `IngestionDedupeIT`: repeated ingestion with identical payloads without duplicated price observations
+
+Run the full backend test suite from [`backend/`](backend):
+
+```bash
+./gradlew test
+```
+
+On Windows PowerShell:
+
+```powershell
+.\gradlew.bat test
+```
+
+Run only the new unit tests:
+
+```bash
+./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceTest" --tests "uk.co.fuelfinder.ingestion.normalize.PriceObservationIngestionServiceTest"
+```
+
+Run only the integration tests:
+
+```bash
+./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.IngestionDedupeIT"
+```
+
+These integration tests require Docker because Testcontainers starts a PostgreSQL/PostGIS database automatically.
+
 ## Repository Layout
 
 ```text
@@ -183,10 +222,10 @@ fuel-finder/
 
 Near-term priorities:
 
-- complete the price ingestion pipeline
-- align JDBC writes and schema evolution
-- add integration tests for the ingestion flow
 - expose geospatial and station-history API endpoints
+- extend integration tests to cover more ingestion edge cases and failure paths
+- align or remove unused JDBC write paths
+- improve operational visibility and ingestion diagnostics
 
 ## Why This Project
 
