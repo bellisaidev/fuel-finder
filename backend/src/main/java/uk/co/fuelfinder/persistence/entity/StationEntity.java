@@ -43,6 +43,7 @@ public class StationEntity {
     @Column(name = "location", columnDefinition = "geography(Point,4326)")
     private Point location;
 
+    @Builder.Default
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
