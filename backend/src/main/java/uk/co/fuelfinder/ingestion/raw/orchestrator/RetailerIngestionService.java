@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import uk.co.fuelfinder.ingestion.normalize.NormalizedStation;
 import uk.co.fuelfinder.ingestion.normalize.PfsStationNormalizer;
+import uk.co.fuelfinder.ingestion.normalize.LatestPriceProjectionService;
 import uk.co.fuelfinder.ingestion.normalize.PriceObservationIngestionService;
 import uk.co.fuelfinder.ingestion.normalize.StationUpsertService;
 import uk.co.fuelfinder.ingestion.raw.FeedType;
@@ -37,6 +38,7 @@ public class RetailerIngestionService {
     private final PfsStationNormalizer pfsStationNormalizer;
     private final StationUpsertService stationUpsertService;
     private final PriceObservationIngestionService priceObservationIngestionService;
+    private final LatestPriceProjectionService latestPriceProjectionService;
 
     public RawIngestionSummary ingest(RetailerEntity retailer) {
         Instant startedAt = Instant.now();
@@ -81,6 +83,7 @@ public class RetailerIngestionService {
                     fuelPricesRawFeed,
                     new ArrayList<>(fuelPricesStations)
             );
+            int latestPricesBackfilled = latestPriceProjectionService.backfillIfEmpty();
 
             RawIngestionSummary summary = RawIngestionSummary.success(
                     retailerName,
@@ -94,7 +97,7 @@ public class RetailerIngestionService {
             );
 
             log.info(
-                    "Completed ingestion for retailer={}: pfsRecordCount={}, pfsBatchCount={}, fuelPricesRecordCount={}, fuelPricesBatchCount={}, stationUpserts={}, observationsInserted={}, pfsRawFeedFetchId={}, fuelPricesRawFeedFetchId={}",
+                    "Completed ingestion for retailer={}: pfsRecordCount={}, pfsBatchCount={}, fuelPricesRecordCount={}, fuelPricesBatchCount={}, stationUpserts={}, observationsInserted={}, latestPricesBackfilled={}, pfsRawFeedFetchId={}, fuelPricesRawFeedFetchId={}",
                     retailerName,
                     summary.getPfsRecordCount(),
                     pfsResult.batchCount(),
@@ -102,6 +105,7 @@ public class RetailerIngestionService {
                     fuelPricesResult.batchCount(),
                     stationUpserts,
                     observationsInserted,
+                    latestPricesBackfilled,
                     summary.getPfsRawFeedFetchId(),
                     summary.getFuelPricesRawFeedFetchId()
             );
