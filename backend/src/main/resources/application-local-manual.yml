@@ -6,6 +6,6 @@ fuelfinder:
       client-secret: ${FUEL_FINDER_CLIENT_SECRET}
   ingestion:
     scheduler:
-      enabled: true
+      enabled: false
       cron: "0 * * * * *"   #every minute
       retailer-name: "FUEL_FINDER_API"
