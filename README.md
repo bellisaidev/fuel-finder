@@ -263,4 +263,4 @@ This project is meant to demonstrate practical backend engineering concerns such
 
 ## License
 
-This project is licensed under the MIT License. See `LICENSE` for details.
+This project is licensed under the Proprietary License (All Rights Reserved). See `LICENSE` for details.
