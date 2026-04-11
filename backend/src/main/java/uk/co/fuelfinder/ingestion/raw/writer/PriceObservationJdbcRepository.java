@@ -1,10 +1,12 @@
 package uk.co.fuelfinder.ingestion.raw.writer;
 
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
-import java.util.Map;
 import java.util.UUID;
 
 @Repository
@@ -29,16 +31,17 @@ public class PriceObservationJdbcRepository {
         String sql = """
             INSERT INTO price_observation (id, station_id, fuel_type, price_pence, observed_at, source_hash)
             VALUES (:id, :station_id, :fuel_type, :price_pence, :observed_at, :source_hash)
-            ON CONFLICT (source_hash) DO NOTHING
+            ON CONFLICT (station_id, fuel_type, source_hash) DO NOTHING
             """;
 
-        return jdbc.update(sql, Map.of(
-                "id", id,
-                "station_id", stationId,
-                "fuel_type", fuelType,
-                "price_pence", pricePence,
-                "observed_at", observedAt,
-                "source_hash", sourceHash
-        ));
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("station_id", stationId)
+                .addValue("fuel_type", fuelType)
+                .addValue("price_pence", pricePence)
+                .addValue("observed_at", Timestamp.from(observedAt), Types.TIMESTAMP)
+                .addValue("source_hash", sourceHash);
+
+        return jdbc.update(sql, params);
     }
 }
