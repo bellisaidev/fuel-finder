@@ -12,7 +12,7 @@ import uk.co.fuelfinder.persistence.repository.RetailerRepository;
 
 @Slf4j
 @Component
-@Profile("local")
+@Profile("local-manual")
 public class IngestionRunner implements CommandLineRunner {
 
     private static final String FUEL_FINDER_RETAILER_NAME = "FUEL_FINDER_API";
