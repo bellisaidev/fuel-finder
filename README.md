@@ -17,13 +17,13 @@ What is implemented today:
 - Station normalization and upsert flow
 - Fuel price normalization, deduplicated observation ingestion, and latest price projection/backfill
 - Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
-- Unit tests with JUnit 5 and Mockito for ingestion orchestration and price observation ingestion
-- Integration tests with Testcontainers for end-to-end ingestion and deduplication flows
+- Unit tests with JUnit 5 and Mockito across auth, client, normalization, exception, and ingestion orchestration components
+- Integration tests with Spring Boot Test and Testcontainers for JDBC persistence, end-to-end ingestion, and deduplication flows
 
 What is still in progress:
 
 - REST API endpoints for nearby stations and price history
-- Broader integration coverage across more components and failure scenarios
+- Broader integration coverage across more failure scenarios and ingestion edge cases
 - Cleanup or consolidation of alternative JDBC write paths that are not part of the active ingestion flow
 
 ## Tech Stack
@@ -163,14 +163,14 @@ http://localhost:8080/actuator/health
 
 ## Testing
 
-The backend includes unit and integration tests based on Spring Boot Test, JUnit 5, Mockito, and Testcontainers.
+The backend includes unit and integration tests based on JUnit 5, Mockito, Spring Boot Test, Testcontainers, and JaCoCo coverage reporting.
 
-Recently added coverage includes:
+Current test coverage includes:
 
-- `RetailerIngestionService`: happy path, paginated fetch flow, downstream service invocation, and failure handling
-- `PriceObservationIngestionService`: observation insert, duplicate skip, missing-station skip, and input validation
-- `RetailerIngestionServiceIT`: end-to-end ingestion with real PostgreSQL/PostGIS persistence through Testcontainers
-- `IngestionDedupeIT`: repeated ingestion with identical payloads without duplicated price observations
+- unit tests for OAuth token retrieval and Fuel Finder API clients
+- unit tests for ingestion orchestration, latest-price projection, price observation ingestion, utility logic, and custom exceptions
+- integration tests for JDBC repository writes against PostgreSQL/PostGIS
+- integration tests for end-to-end ingestion and repeated-ingestion deduplication flows
 
 Run the full backend test suite from [`backend/`](backend):
 
@@ -184,19 +184,33 @@ On Windows PowerShell:
 .\gradlew.bat test
 ```
 
-Run only the new unit tests:
+Generate the JaCoCo HTML coverage report:
+
+```bash
+./gradlew test jacocoTestReport
+```
+
+On Windows PowerShell:
+
+```powershell
+.\gradlew.bat test jacocoTestReport
+```
+
+The HTML report is written to [`backend/build/reports/jacoco/test/html/index.html`](backend/build/reports/jacoco/test/html/index.html).
+
+Run only selected unit tests:
 
 ```bash
 ./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceTest" --tests "uk.co.fuelfinder.ingestion.normalize.PriceObservationIngestionServiceTest"
 ```
 
-Run only the integration tests:
+Run only selected integration tests:
 
 ```bash
-./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.IngestionDedupeIT"
+./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.writer.JdbcRepositoriesIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.IngestionDedupeIT"
 ```
 
-These integration tests require Docker because Testcontainers starts a PostgreSQL/PostGIS database automatically.
+Tests matching `*IT` run as part of the standard `test` task in this project. Integration tests require Docker because Testcontainers starts PostgreSQL/PostGIS containers automatically.
 
 ## Repository Layout
 
@@ -224,6 +238,7 @@ Near-term priorities:
 
 - expose geospatial and station-history API endpoints
 - extend integration tests to cover more ingestion edge cases and failure paths
+- raise and enforce JaCoCo coverage thresholds over time
 - align or remove unused JDBC write paths
 - improve operational visibility and ingestion diagnostics
 
