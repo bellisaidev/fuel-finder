@@ -182,6 +182,115 @@ class RetailerIngestionServiceTest {
         assertEquals(fuelPricesStation, captor.getValue().getFirst());
     }
 
+    @Test
+    void ingestStoresEmptyFeedsAndSkipsDownstreamProcessingWhenBothResponsesAreEmpty() {
+        RetailerEntity retailer = retailer("Asda");
+        RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
+        RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
+
+        when(pfsClient.fetchBatch(1)).thenReturn(List.of());
+        when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(List.of());
+        when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(), 0)).thenReturn(pfsRawFeed);
+        when(rawFeedStorageService.store(retailer, FeedType.FUEL_PRICES, "/pfs/fuel-prices", 1, List.of(), 0))
+                .thenReturn(fuelPricesRawFeed);
+        when(priceObservationIngestionService.ingest(retailer, fuelPricesRawFeed, new ArrayList<>()))
+                .thenReturn(0);
+        when(latestPriceProjectionService.backfillIfEmpty()).thenReturn(0);
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertTrue(summary.isSuccess());
+        assertEquals(0, summary.getPfsRecordCount());
+        assertEquals(0, summary.getFuelPricesRecordCount());
+        assertEquals(pfsRawFeed.getId(), summary.getPfsRawFeedFetchId());
+        assertEquals(fuelPricesRawFeed.getId(), summary.getFuelPricesRawFeedFetchId());
+
+        verify(pfsClient).fetchBatch(1);
+        verify(fuelPricesClient).fetchFuelPrices(1);
+        verify(pfsStationNormalizer, never()).normalize(any());
+        verify(stationUpsertService, never()).upsert(any(), any());
+        verify(priceObservationIngestionService).ingest(eq(retailer), eq(fuelPricesRawFeed), eq(new ArrayList<>()));
+        verify(latestPriceProjectionService).backfillIfEmpty();
+    }
+
+    @Test
+    void ingestReturnsFailureSummaryWhenFuelPricesFetchFailsAfterPfsWasStored() {
+        RetailerEntity retailer = retailer("Esso");
+        PfsStationDto pfsStation = pfsStation("site-11");
+        NormalizedStation normalizedStation = NormalizedStation.builder().siteId("site-11").active(true).build();
+        RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
+
+        when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1)).thenReturn(pfsRawFeed);
+        when(pfsStationNormalizer.normalize(pfsStation)).thenReturn(normalizedStation);
+        when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
+        when(fuelPricesClient.fetchFuelPrices(1)).thenThrow(new RuntimeException("Fuel prices down"));
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertFalse(summary.isSuccess());
+        assertEquals("Esso", summary.getRetailerName());
+        assertEquals("Fuel prices down", summary.getFailureReason());
+        assertEquals(0, summary.getPfsRecordCount());
+        assertEquals(0, summary.getFuelPricesRecordCount());
+
+        verify(rawFeedStorageService).store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1);
+        verify(rawFeedStorageService, never()).store(eq(retailer), eq(FeedType.FUEL_PRICES), any(), any(Integer.class), any(), any(Integer.class));
+        verify(stationUpsertService).upsert(retailer, normalizedStation);
+        verify(priceObservationIngestionService, never()).ingest(any(), any(), any());
+        verify(latestPriceProjectionService, never()).backfillIfEmpty();
+    }
+
+    @Test
+    void ingestReturnsFailureSummaryWhenPfsStorageFails() {
+        RetailerEntity retailer = retailer("Morrisons");
+        PfsStationDto pfsStation = pfsStation("site-20");
+
+        when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1))
+                .thenThrow(new IllegalStateException("PFS store failed"));
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertFalse(summary.isSuccess());
+        assertEquals("PFS store failed", summary.getFailureReason());
+
+        verify(pfsStationNormalizer, never()).normalize(any());
+        verify(fuelPricesClient, never()).fetchFuelPrices(any(Integer.class));
+        verify(priceObservationIngestionService, never()).ingest(any(), any(), any());
+        verify(latestPriceProjectionService, never()).backfillIfEmpty();
+    }
+
+    @Test
+    void ingestReturnsFailureSummaryWhenBackfillFailsAtEnd() {
+        RetailerEntity retailer = retailer("Jet");
+        PfsStationDto pfsStation = pfsStation("site-30");
+        FuelPricesStationDto fuelPricesStation = fuelPricesStation("site-30");
+        NormalizedStation normalizedStation = NormalizedStation.builder().siteId("site-30").active(true).build();
+        RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
+        RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
+
+        when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(List.of(fuelPricesStation));
+        when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1)).thenReturn(pfsRawFeed);
+        when(rawFeedStorageService.store(retailer, FeedType.FUEL_PRICES, "/pfs/fuel-prices", 1, List.of(fuelPricesStation), 1))
+                .thenReturn(fuelPricesRawFeed);
+        when(pfsStationNormalizer.normalize(pfsStation)).thenReturn(normalizedStation);
+        when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
+        when(priceObservationIngestionService.ingest(retailer, fuelPricesRawFeed, new ArrayList<>(List.of(fuelPricesStation))))
+                .thenReturn(1);
+        when(latestPriceProjectionService.backfillIfEmpty()).thenThrow(new IllegalStateException("Backfill failed"));
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertFalse(summary.isSuccess());
+        assertEquals("Jet", summary.getRetailerName());
+        assertEquals("Backfill failed", summary.getFailureReason());
+
+        verify(priceObservationIngestionService).ingest(eq(retailer), eq(fuelPricesRawFeed), any(ArrayList.class));
+        verify(latestPriceProjectionService).backfillIfEmpty();
+    }
+
     private static RetailerEntity retailer(String name) {
         RetailerEntity retailer = new RetailerEntity();
         retailer.setId(UUID.randomUUID());
