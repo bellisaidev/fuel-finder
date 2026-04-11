@@ -1,4 +1,8 @@
-fuel-finder:
+fuelfinder:
   api:
     base-url: https://www.fuel-finder.service.gov.uk/api/v1
-    token-url: https://www.fuel-finder.service.gov.uk/api/v1/oauth/generate_access_token
+  ingestion:
+    scheduler:
+      enabled: true
+      cron: "0 */30 * * * *"
+      retailer-name: "FUEL_FINDER_API"
