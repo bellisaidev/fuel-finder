@@ -128,6 +128,11 @@ class RetailerIngestionServiceIT {
                 .containsExactlyInAnyOrder("site-1", "site-2");
         assertThat(stations)
                 .allSatisfy(station -> {
+                    assertThat(station.getAddress()).isEqualTo("10 Downing Street");
+                    assertThat(station.getCity()).isEqualTo("London");
+                    assertThat(station.getCounty()).isEqualTo("Greater London");
+                    assertThat(station.getCountry()).isEqualTo("UK");
+                    assertThat(station.getPostcode()).isEqualTo("SW1A 2AA");
                     assertThat(station.getLocation()).isNotNull();
                     assertThat(station.getLocation().getSRID()).isEqualTo(4326);
                 });
@@ -154,7 +159,16 @@ class RetailerIngestionServiceIT {
                 null,
                 false,
                 false,
-                new PfsLocationDto(null, null, null, null, null, null, latitude, longitude),
+                new PfsLocationDto(
+                        "10 Downing Street",
+                        "Westminster",
+                        "London",
+                        "UK",
+                        "Greater London",
+                        "SW1A 2AA",
+                        latitude,
+                        longitude
+                ),
                 List.of(),
                 null,
                 List.of("E10", "B7")

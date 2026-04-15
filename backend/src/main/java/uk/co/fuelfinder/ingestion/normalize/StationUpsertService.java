@@ -58,6 +58,9 @@ public class StationUpsertService {
                 .siteId(normalizedStation.getSiteId())
                 .brand(normalizedStation.getBrand())
                 .address(normalizedStation.getAddress())
+                .city(normalizedStation.getCity())
+                .county(normalizedStation.getCounty())
+                .country(normalizedStation.getCountry())
                 .postcode(normalizedStation.getPostcode())
                 .location(toPoint(normalizedStation.getLongitude(), normalizedStation.getLatitude()))
                 .active(normalizedStation.isActive())
@@ -69,6 +72,9 @@ public class StationUpsertService {
     private void updateExisting(StationEntity entity, NormalizedStation normalizedStation) {
         entity.setBrand(normalizedStation.getBrand());
         entity.setAddress(normalizedStation.getAddress());
+        entity.setCity(normalizedStation.getCity());
+        entity.setCounty(normalizedStation.getCounty());
+        entity.setCountry(normalizedStation.getCountry());
         entity.setPostcode(normalizedStation.getPostcode());
         entity.setLocation(toPoint(normalizedStation.getLongitude(), normalizedStation.getLatitude()));
         entity.setActive(normalizedStation.isActive());

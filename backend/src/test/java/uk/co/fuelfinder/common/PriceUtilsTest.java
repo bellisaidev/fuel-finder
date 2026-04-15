@@ -15,6 +15,11 @@ class PriceUtilsTest {
     }
 
     @Test
+    void convertsPenceWithDecimalFractionToWholePence() {
+        assertEquals(175, PriceUtils.toPence(new BigDecimal("174.9")));
+    }
+
+    @Test
     void rejectsNullPrice() {
         assertThrows(IllegalArgumentException.class, () -> PriceUtils.toPence(null));
     }
