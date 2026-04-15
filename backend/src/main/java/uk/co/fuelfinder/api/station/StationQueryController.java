@@ -32,4 +32,21 @@ public class StationQueryController {
                 limit
         );
     }
+
+    @GetMapping("/cheapest-nearby")
+    public List<NearbyStationResponse> getCheapestNearbyStations(
+            @RequestParam double lat,
+            @RequestParam double lon,
+            @RequestParam double radiusMeters,
+            @RequestParam String fuelType,
+            @RequestParam(required = false) Integer limit
+    ) {
+        return stationQueryService.findCheapestNearbyStations(
+                lat,
+                lon,
+                radiusMeters,
+                fuelType,
+                limit
+        );
+    }
 }

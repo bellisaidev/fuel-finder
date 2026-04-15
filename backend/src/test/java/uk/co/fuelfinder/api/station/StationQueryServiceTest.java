@@ -71,6 +71,48 @@ class StationQueryServiceTest {
     }
 
     @Test
+    void returnsMappedCheapestNearbyStationsUsingPriceFirstOrderingQuery() {
+        UUID stationId = UUID.randomUUID();
+        NearbyStationProjection projection = new TestNearbyStationProjection(
+                stationId,
+                "SITE-2",
+                "BP",
+                "1 Victoria Street",
+                "London",
+                "Greater London",
+                "UK",
+                "SW1H 0ET",
+                "E5",
+                139,
+                950.0
+        );
+
+        when(stationQueryRepository.findCheapestNearbyStations(
+                eq(51.5074),
+                eq(-0.1278),
+                eq(5000.0),
+                eq("E5"),
+                eq(5)
+        )).thenReturn(List.of(projection));
+
+        List<NearbyStationResponse> response = stationQueryService.findCheapestNearbyStations(
+                51.5074,
+                -0.1278,
+                5000.0,
+                "e5",
+                5
+        );
+
+        assertEquals(1, response.size());
+        assertEquals(stationId, response.getFirst().stationId());
+        assertEquals("BP", response.getFirst().brand());
+        assertEquals(139, response.getFirst().pricePence());
+        assertEquals(950.0, response.getFirst().distanceMeters());
+
+        verify(stationQueryRepository).findCheapestNearbyStations(51.5074, -0.1278, 5000.0, "E5", 5);
+    }
+
+    @Test
     void rejectsInvalidLatitude() {
         IllegalArgumentException exception = assertThrows(
                 IllegalArgumentException.class,

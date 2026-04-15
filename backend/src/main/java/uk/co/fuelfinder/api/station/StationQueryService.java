@@ -43,6 +43,32 @@ public class StationQueryService {
                 .toList();
     }
 
+    public List<NearbyStationResponse> findCheapestNearbyStations(
+            double lat,
+            double lon,
+            double radiusMeters,
+            String fuelType,
+            Integer limit
+    ) {
+        validateLat(lat);
+        validateLon(lon);
+        validateRadius(radiusMeters);
+
+        String normalizedFuelType = validateAndNormalizeFuelType(fuelType);
+        int normalizedLimit = normalizeLimit(limit);
+
+        return stationQueryRepository.findCheapestNearbyStations(
+                        lat,
+                        lon,
+                        radiusMeters,
+                        normalizedFuelType,
+                        normalizedLimit
+                )
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     private NearbyStationResponse toResponse(NearbyStationProjection projection) {
         return new NearbyStationResponse(
                 projection.getStationId(),
