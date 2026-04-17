@@ -32,6 +32,14 @@ management:
     health:
       show-details: always
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+
 fuelfinder:
   api:
     base-url: https://www.fuel-finder.service.gov.uk/api/v1
