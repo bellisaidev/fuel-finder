@@ -2,8 +2,10 @@ package uk.co.fuelfinder.ingestion.normalize;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import uk.co.fuelfinder.api.station.LatestPricesChangedEvent;
 import uk.co.fuelfinder.persistence.entity.LatestPriceEntity;
 import uk.co.fuelfinder.persistence.entity.LatestPriceId;
 import uk.co.fuelfinder.persistence.entity.PriceObservationEntity;
@@ -17,6 +19,7 @@ public class LatestPriceProjectionService {
 
     private final LatestPriceRepository latestPriceRepository;
     private final PriceObservationRepository priceObservationRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional
     public void upsertFromObservation(PriceObservationEntity observation) {
@@ -86,6 +89,10 @@ public class LatestPriceProjectionService {
                 inserted,
                 observationCount
         );
+
+        if (inserted > 0) {
+            applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("latest-price-backfill"));
+        }
 
         return inserted;
     }

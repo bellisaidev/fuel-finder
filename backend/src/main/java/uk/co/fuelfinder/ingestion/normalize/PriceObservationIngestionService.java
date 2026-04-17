@@ -2,8 +2,10 @@ package uk.co.fuelfinder.ingestion.normalize;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import uk.co.fuelfinder.api.station.LatestPricesChangedEvent;
 import uk.co.fuelfinder.common.HashingUtils;
 import uk.co.fuelfinder.common.PriceUtils;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
@@ -28,6 +30,7 @@ public class PriceObservationIngestionService {
     private final StationRepository stationRepository;
     private final PriceObservationRepository priceObservationRepository;
     private final LatestPriceProjectionService latestPriceProjectionService;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional
     public int ingest(
@@ -96,6 +99,10 @@ public class PriceObservationIngestionService {
                 skippedDuplicate,
                 skippedMissingStation
         );
+
+        if (inserted > 0) {
+            applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("price-observation-ingestion"));
+        }
 
         return inserted;
     }

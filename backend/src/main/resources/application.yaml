@@ -41,6 +41,13 @@ springdoc:
     tags-sorter: alpha
 
 fuelfinder:
+  cache:
+    nearby:
+      ttl: 60s
+      max-size: 500
+    cheapest-nearby:
+      ttl: 60s
+      max-size: 500
   api:
     base-url: https://www.fuel-finder.service.gov.uk/api/v1
     oauth:
