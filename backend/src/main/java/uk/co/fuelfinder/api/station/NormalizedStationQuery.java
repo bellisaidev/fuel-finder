@@ -3,7 +3,7 @@ package uk.co.fuelfinder.api.station;
 public record NormalizedStationQuery(
         double lat,
         double lon,
-        long radiusMeters,
+        double radiusMeters,
         String fuelType,
         int limit
 ) {

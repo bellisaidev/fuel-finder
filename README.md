@@ -151,10 +151,11 @@ Behavior:
 
 - `/nearby` sorts primarily by distance, then price
 - `/cheapest-nearby` sorts primarily by price, then distance
+- valid queries with no matches return `200 OK` with `[]`
 - both endpoints are cached in-memory for repeated equivalent queries
-- cache keys are based on normalized query input: trimmed/uppercased `fuelType`, resolved default `limit`, `lat` and `lon` rounded to 4 decimals, and `radiusMeters` stabilized to whole meters
+- cache keys are based on normalized query input: trimmed/uppercased `fuelType` and resolved default `limit`
 - caches are invalidated after transaction commit when the `latest_price` read model changes
-- invalid parameters return HTTP `400` via a global API exception handler
+- invalid, missing, or non-parseable parameters return HTTP `400` via a global API exception handler
 
 ### OpenAPI / Swagger
 

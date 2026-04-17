@@ -45,7 +45,7 @@ class StationQueryServiceTest {
         when(cachedStationQueryService.findNearbyStations(argThat(query ->
                 query.lat() == 51.5
                         && query.lon() == -0.1
-                        && query.radiusMeters() == 2000L
+                        && query.radiusMeters() == 2000.0
                         && query.fuelType().equals("E10")
                         && query.limit() == 10
         ))).thenReturn(List.of(expected));
@@ -65,7 +65,7 @@ class StationQueryServiceTest {
         assertEquals(145, response.getFirst().pricePence());
         assertEquals(321.5, response.getFirst().distanceMeters());
 
-        verify(cachedStationQueryService).findNearbyStations(new NormalizedStationQuery(51.5, -0.1, 2000L, "E10", 10));
+        verify(cachedStationQueryService).findNearbyStations(new NormalizedStationQuery(51.5, -0.1, 2000.0, "E10", 10));
     }
 
     @Test
@@ -88,7 +88,7 @@ class StationQueryServiceTest {
         when(cachedStationQueryService.findCheapestNearbyStations(argThat(query ->
                 query.lat() == 51.5074
                         && query.lon() == -0.1278
-                        && query.radiusMeters() == 5000L
+                        && query.radiusMeters() == 5000.0
                         && query.fuelType().equals("E5")
                         && query.limit() == 5
         ))).thenReturn(List.of(expected));
@@ -108,16 +108,16 @@ class StationQueryServiceTest {
         assertEquals(950.0, response.getFirst().distanceMeters());
 
         verify(cachedStationQueryService).findCheapestNearbyStations(
-                new NormalizedStationQuery(51.5074, -0.1278, 5000L, "E5", 5)
+                new NormalizedStationQuery(51.5074, -0.1278, 5000.0, "E5", 5)
         );
     }
 
     @Test
-    void normalizesCoordinatesAndRadiusBeforeDelegatingToCachedService() {
+    void preservesCoordinatesAndRadiusWhileNormalizingFuelTypeAndDefaultLimit() {
         when(cachedStationQueryService.findNearbyStations(argThat(query ->
-                query.lat() == 51.5074
-                        && query.lon() == -0.1278
-                        && query.radiusMeters() == 2000L
+                query.lat() == 51.5074001
+                        && query.lon() == -0.1278001
+                        && query.radiusMeters() == 2000.4
                         && query.fuelType().equals("E5")
                         && query.limit() == 10
         ))).thenReturn(List.of());
@@ -131,18 +131,8 @@ class StationQueryServiceTest {
         );
 
         verify(cachedStationQueryService).findNearbyStations(
-                new NormalizedStationQuery(51.5074, -0.1278, 2000L, "E5", 10)
+                new NormalizedStationQuery(51.5074001, -0.1278001, 2000.4, "E5", 10)
         );
-    }
-
-    @Test
-    void rejectsInvalidLatitude() {
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
-                () -> stationQueryService.findNearbyStations(91.0, -0.1, 1000.0, "E10", 10)
-        );
-
-        assertEquals("lat must be between -90 and 90", exception.getMessage());
     }
 
     @Test

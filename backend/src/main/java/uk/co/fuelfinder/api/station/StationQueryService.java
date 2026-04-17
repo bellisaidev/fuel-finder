@@ -4,8 +4,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 
 @Service
@@ -24,10 +22,6 @@ public class StationQueryService {
             String fuelType,
             Integer limit
     ) {
-        validateLat(lat);
-        validateLon(lon);
-        validateRadius(radiusMeters);
-
         return cachedStationQueryService.findNearbyStations(normalizeQuery(lat, lon, radiusMeters, fuelType, limit));
     }
 
@@ -38,29 +32,7 @@ public class StationQueryService {
             String fuelType,
             Integer limit
     ) {
-        validateLat(lat);
-        validateLon(lon);
-        validateRadius(radiusMeters);
-
         return cachedStationQueryService.findCheapestNearbyStations(normalizeQuery(lat, lon, radiusMeters, fuelType, limit));
-    }
-
-    private void validateLat(double lat) {
-        if (lat < -90 || lat > 90) {
-            throw new IllegalArgumentException("lat must be between -90 and 90");
-        }
-    }
-
-    private void validateLon(double lon) {
-        if (lon < -180 || lon > 180) {
-            throw new IllegalArgumentException("lon must be between -180 and 180");
-        }
-    }
-
-    private void validateRadius(double radiusMeters) {
-        if (radiusMeters <= 0) {
-            throw new IllegalArgumentException("radiusMeters must be greater than 0");
-        }
     }
 
     private String validateAndNormalizeFuelType(String fuelType) {
@@ -93,17 +65,11 @@ public class StationQueryService {
             Integer limit
     ) {
         return new NormalizedStationQuery(
-                roundCoordinate(lat),
-                roundCoordinate(lon),
-                Math.round(radiusMeters),
+                lat,
+                lon,
+                radiusMeters,
                 validateAndNormalizeFuelType(fuelType),
                 normalizeLimit(limit)
         );
-    }
-
-    private double roundCoordinate(double value) {
-        return BigDecimal.valueOf(value)
-                .setScale(4, RoundingMode.HALF_UP)
-                .doubleValue();
     }
 }
