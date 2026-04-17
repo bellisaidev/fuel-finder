@@ -149,6 +149,15 @@ Behavior:
 - `/cheapest-nearby` sorts primarily by price, then distance
 - invalid parameters return HTTP `400` via a global API exception handler
 
+### OpenAPI / Swagger
+
+The backend now exposes machine-readable OpenAPI docs plus Swagger UI:
+
+- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+
+Swagger UI documents query parameters, response payloads, and standard `400` validation-style errors for the public station endpoints.
+
 ## Running Locally
 
 ### 1. Create local environment variables

@@ -1,8 +1,7 @@
 package uk.co.fuelfinder.api;
 
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
+import uk.co.fuelfinder.api.dto.ApiErrorResponse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -12,12 +11,12 @@ class ApiExceptionHandlerTest {
 
     @Test
     void returnsBadRequestPayloadForIllegalArgumentException() {
-        Map<String, Object> response = apiExceptionHandler.handleIllegalArgument(
+        ApiErrorResponse response = apiExceptionHandler.handleIllegalArgument(
                 new IllegalArgumentException("fuelType must not be blank")
         );
 
-        assertEquals(400, response.get("status"));
-        assertEquals("Bad Request", response.get("error"));
-        assertEquals("fuelType must not be blank", response.get("message"));
+        assertEquals(400, response.status());
+        assertEquals("Bad Request", response.error());
+        assertEquals("fuelType must not be blank", response.message());
     }
 }
