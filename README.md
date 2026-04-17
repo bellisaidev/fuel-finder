@@ -17,6 +17,7 @@ What is implemented today:
 - Station normalization and upsert flow
 - Fuel price normalization, deduplicated observation ingestion, and latest price projection/backfill
 - Geospatial read APIs for nearby stations and cheapest nearby stations
+- Local Caffeine caching for repeated geospatial read queries with transaction-safe invalidation after latest-price updates
 - Global API error handling for invalid query parameters
 - Station persistence enriched with `address`, `city`, `county`, `country`, and `postcode`
 - Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
@@ -36,10 +37,12 @@ What is still in progress:
 - Spring Web
 - Spring WebFlux `WebClient`
 - Spring Data JPA
+- Spring Cache
 - Hibernate Spatial
 - PostgreSQL
 - PostGIS
 - Flyway
+- Caffeine
 - Docker Compose
 - Lombok
 - Testcontainers
@@ -50,7 +53,7 @@ The codebase is structured as a modular monolith with a backend-first focus.
 
 Main areas:
 
-- `config/`: Spring configuration and WebClient setup
+- `config/`: Spring configuration, WebClient setup, and cache configuration/properties
 - `ingestion/raw/auth/`: Fuel Finder API properties, OAuth clients, token management
 - `ingestion/raw/client/`: external feed clients and DTOs
 - `ingestion/raw/orchestrator/`: ingestion coordination
@@ -104,6 +107,7 @@ Important design choices:
 - database migrations are source-controlled with Flyway
 - the model separates historical observations from the latest-price read model
 - geospatial API reads are served from `station` joined to `latest_price`
+- repeated geospatial reads are cached in-memory to reduce repeated DB load
 
 ### Station Location Fields
 
@@ -147,6 +151,9 @@ Behavior:
 
 - `/nearby` sorts primarily by distance, then price
 - `/cheapest-nearby` sorts primarily by price, then distance
+- both endpoints are cached in-memory for repeated equivalent queries
+- cache keys are based on normalized query input: trimmed/uppercased `fuelType`, resolved default `limit`, `lat` and `lon` rounded to 4 decimals, and `radiusMeters` stabilized to whole meters
+- caches are invalidated after transaction commit when the `latest_price` read model changes
 - invalid parameters return HTTP `400` via a global API exception handler
 
 ### OpenAPI / Swagger
@@ -242,6 +249,24 @@ http://localhost:8080/v1/stations/cheapest-nearby?lat=51.5074&lon=-0.1278&radius
 - Lightweight test-profile settings live in [`backend/src/test/resources/application-test.yaml`](backend/src/test/resources/application-test.yaml)
 - `.env` is local-only and should never be committed
 
+### Cache Settings
+
+The station read API uses local in-memory caches backed by Caffeine.
+
+Current defaults in [`backend/src/main/resources/application.yaml`](backend/src/main/resources/application.yaml):
+
+- `fuelfinder.cache.nearby.ttl=60s`
+- `fuelfinder.cache.nearby.max-size=500`
+- `fuelfinder.cache.cheapest-nearby.ttl=60s`
+- `fuelfinder.cache.cheapest-nearby.max-size=500`
+
+Notes:
+
+- the cache is local to each application instance
+- cache entries are evicted automatically after `60s`
+- both station-query caches are cleared after a successful transaction commit that changes the `latest_price` read model
+- equivalent requests such as `fuelType=e5` and `fuelType=E5` reuse the same cache entry after normalization
+
 ## Testing
 
 The backend includes unit and integration tests based on JUnit 5, Mockito, Spring Boot Test, Testcontainers, and JaCoCo coverage reporting.
@@ -250,6 +275,7 @@ Current test coverage includes:
 
 - unit tests for OAuth token retrieval and Fuel Finder API clients
 - unit tests for ingestion orchestration, station normalization, latest-price projection, price observation ingestion, utility logic, station query services, and custom exceptions
+- cache-focused tests for normalized query keys, repeated-query cache hits, and after-commit cache invalidation behavior
 - integration tests for JDBC repository writes against PostgreSQL/PostGIS
 - integration tests for end-to-end ingestion, repeated-ingestion deduplication flows, and station field persistence
 
@@ -282,7 +308,7 @@ The HTML report is written to [`backend/build/reports/jacoco/test/html/index.htm
 Run only selected unit tests:
 
 ```bash
-./gradlew test --tests "uk.co.fuelfinder.api.station.StationQueryServiceTest" --tests "uk.co.fuelfinder.ingestion.normalize.PfsStationNormalizerTest"
+./gradlew test --tests "uk.co.fuelfinder.api.station.StationQueryServiceTest" --tests "uk.co.fuelfinder.api.station.CachedStationQueryServiceCachingTest"
 ```
 
 Run only selected integration tests:
