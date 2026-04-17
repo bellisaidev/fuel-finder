@@ -3,6 +3,7 @@ package uk.co.fuelfinder.ingestion.raw.orchestrator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
@@ -12,13 +13,14 @@ import uk.co.fuelfinder.persistence.repository.RetailerRepository;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "fuelfinder.ingestion.scheduler", name = "enabled", havingValue = "true")
 public class IngestionScheduler {
 
     private final IngestionSchedulerProperties schedulerProperties;
     private final RetailerRepository retailerRepository;
     private final RetailerIngestionService retailerIngestionService;
 
-    @Scheduled(cron = "${fuelfinder.ingestion.scheduler.cron}")
+    @Scheduled(cron = "${fuelfinder.ingestion.scheduler.cron:0 */30 * * * *}")
     @SchedulerLock(
             name = "fuelFinderIngestionJob",
             lockAtMostFor = "PT30M",

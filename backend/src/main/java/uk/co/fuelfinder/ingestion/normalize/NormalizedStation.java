@@ -9,6 +9,9 @@ public class NormalizedStation {
     String siteId;
     String brand;
     String address;
+    String city;
+    String county;
+    String country;
     String postcode;
     Double latitude;
     Double longitude;

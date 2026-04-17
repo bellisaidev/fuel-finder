@@ -38,3 +38,8 @@ fuelfinder:
     oauth:
       token-path: /oauth/generate_access_token
       refresh-path: /oauth/regenerate_access_token
+  ingestion:
+    scheduler:
+      enabled: false
+      cron: "0 */30 * * * *"
+      retailer-name: "FUEL_FINDER_API"

@@ -2,7 +2,7 @@
 
 Fuel Finder is a backend Java/Spring Boot project for ingesting and storing data from the UK Fuel Finder Scheme.
 
-The repository currently focuses on the ingestion side of the platform: OAuth authentication, paginated feed retrieval, raw payload storage, station normalization, and PostgreSQL/PostGIS persistence. It is not yet a complete public API service.
+The repository now covers both the ingestion pipeline and an initial geospatial read API: OAuth authentication, paginated feed retrieval, raw payload storage, station normalization, PostgreSQL/PostGIS persistence, and public station lookup endpoints.
 
 ## Current Status
 
@@ -16,13 +16,16 @@ What is implemented today:
 - Raw feed persistence for auditability
 - Station normalization and upsert flow
 - Fuel price normalization, deduplicated observation ingestion, and latest price projection/backfill
+- Geospatial read APIs for nearby stations and cheapest nearby stations
+- Global API error handling for invalid query parameters
+- Station persistence enriched with `address`, `city`, `county`, `country`, and `postcode`
 - Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
 - Unit tests with JUnit 5 and Mockito across auth, client, normalization, exception, and ingestion orchestration components
-- Integration tests with Spring Boot Test and Testcontainers for JDBC persistence, end-to-end ingestion, and deduplication flows
+- Integration tests with Spring Boot Test and Testcontainers for JDBC persistence, end-to-end ingestion, deduplication, and station persistence flows
 
 What is still in progress:
 
-- REST API endpoints for nearby stations and price history
+- Station price history and richer read APIs
 - Broader integration coverage across more failure scenarios and ingestion edge cases
 - Cleanup or consolidation of alternative JDBC write paths that are not part of the active ingestion flow
 
@@ -53,10 +56,9 @@ Main areas:
 - `ingestion/raw/orchestrator/`: ingestion coordination
 - `ingestion/raw/writer/`: raw payload storage plus experimental/alternative JDBC write helpers
 - `ingestion/normalize/`: station normalization, price normalization, observation ingestion, and latest price projection
+- `api/station/`: station read endpoints for nearby and cheapest-nearby lookups
 - `persistence/entity/`: JPA entities
 - `persistence/repository/`: Spring Data repositories
-
-Structural diagram: [docs/structure-diagram.md](docs/structure-diagram.md)
 
 ### High-Level Flow
 
@@ -78,6 +80,8 @@ flowchart TD
     L --> M[(price_observation)]
     L --> N[Latest price update]
     N --> O[(latest_price)]
+    H --> P[Geospatial station query API]
+    O --> P
     H -. station lookup / join .-> L
     J --> I
 ```
@@ -88,9 +92,10 @@ Core tables currently defined through Flyway:
 
 - `retailer`: feed source registry
 - `raw_feed_fetch`: raw JSON payloads and audit trail
-- `station`: normalized station data with geo location
+- `station`: normalized station data with geo location and location metadata
 - `price_observation`: append-only price history
 - `latest_price`: read model for current price lookups
+- `shedlock`: distributed scheduler lock table
 
 Important design choices:
 
@@ -98,6 +103,51 @@ Important design choices:
 - spatial data uses PostGIS
 - database migrations are source-controlled with Flyway
 - the model separates historical observations from the latest-price read model
+- geospatial API reads are served from `station` joined to `latest_price`
+
+### Station Location Fields
+
+The `station` model now persists:
+
+- `address` from PFS `address_line_1`
+- `city`
+- `county`
+- `country`
+- `postcode`
+- `location` as a PostGIS geography point
+
+This keeps the primary street address simple while preserving the other location fields separately for future query and presentation needs.
+
+## API Endpoints
+
+Currently available read endpoints:
+
+- `GET /v1/stations/nearby`
+- `GET /v1/stations/cheapest-nearby`
+
+Both endpoints accept:
+
+- `lat`
+- `lon`
+- `radiusMeters`
+- `fuelType`
+- `limit` optional, default `10`, max `100`
+
+Example:
+
+```text
+http://localhost:8080/v1/stations/nearby?lat=51.5074&lon=-0.1278&radiusMeters=5000&fuelType=E5&limit=10
+```
+
+```text
+http://localhost:8080/v1/stations/cheapest-nearby?lat=51.5074&lon=-0.1278&radiusMeters=5000&fuelType=E5&limit=10
+```
+
+Behavior:
+
+- `/nearby` sorts primarily by distance, then price
+- `/cheapest-nearby` sorts primarily by price, then distance
+- invalid parameters return HTTP `400` via a global API exception handler
 
 ## Running Locally
 
@@ -146,7 +196,15 @@ On Windows PowerShell:
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
-### 5. Verify the service
+### 5. Optional: run one-shot manual ingestion
+
+If you want to trigger ingestion once on startup instead of using the scheduler:
+
+```powershell
+.\gradlew.bat bootRun --args="--spring.profiles.active=local-manual"
+```
+
+### 6. Verify the service
 
 Health endpoint:
 
@@ -154,11 +212,25 @@ Health endpoint:
 http://localhost:8080/actuator/health
 ```
 
+Nearby stations:
+
+```text
+http://localhost:8080/v1/stations/nearby?lat=51.5074&lon=-0.1278&radiusMeters=5000&fuelType=E5&limit=10
+```
+
+Cheapest nearby stations:
+
+```text
+http://localhost:8080/v1/stations/cheapest-nearby?lat=51.5074&lon=-0.1278&radiusMeters=5000&fuelType=E5&limit=10
+```
+
 ## Configuration Notes
 
 - Base application settings live in [`backend/src/main/resources/application.yaml`](backend/src/main/resources/application.yaml)
 - Local Fuel Finder credentials are loaded from [`backend/src/main/resources/application-local.yml`](backend/src/main/resources/application-local.yml)
+- Manual local ingestion settings live in [`backend/src/main/resources/application-local-manual.yml`](backend/src/main/resources/application-local-manual.yml)
 - Production-specific API settings live in [`backend/src/main/resources/application-prod.yml`](backend/src/main/resources/application-prod.yml)
+- Lightweight test-profile settings live in [`backend/src/test/resources/application-test.yaml`](backend/src/test/resources/application-test.yaml)
 - `.env` is local-only and should never be committed
 
 ## Testing
@@ -168,9 +240,9 @@ The backend includes unit and integration tests based on JUnit 5, Mockito, Sprin
 Current test coverage includes:
 
 - unit tests for OAuth token retrieval and Fuel Finder API clients
-- unit tests for ingestion orchestration, latest-price projection, price observation ingestion, utility logic, and custom exceptions
+- unit tests for ingestion orchestration, station normalization, latest-price projection, price observation ingestion, utility logic, station query services, and custom exceptions
 - integration tests for JDBC repository writes against PostgreSQL/PostGIS
-- integration tests for end-to-end ingestion and repeated-ingestion deduplication flows
+- integration tests for end-to-end ingestion, repeated-ingestion deduplication flows, and station field persistence
 
 Run the full backend test suite from [`backend/`](backend):
 
@@ -201,7 +273,7 @@ The HTML report is written to [`backend/build/reports/jacoco/test/html/index.htm
 Run only selected unit tests:
 
 ```bash
-./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceTest" --tests "uk.co.fuelfinder.ingestion.normalize.PriceObservationIngestionServiceTest"
+./gradlew test --tests "uk.co.fuelfinder.api.station.StationQueryServiceTest" --tests "uk.co.fuelfinder.ingestion.normalize.PfsStationNormalizerTest"
 ```
 
 Run only selected integration tests:
@@ -236,7 +308,7 @@ fuel-finder/
 
 Near-term priorities:
 
-- expose geospatial and station-history API endpoints
+- extend read APIs with station price history and richer filters
 - extend integration tests to cover more ingestion edge cases and failure paths
 - raise and enforce JaCoCo coverage thresholds over time
 - align or remove unused JDBC write paths
@@ -252,13 +324,14 @@ This project is meant to demonstrate practical backend engineering concerns such
 - auditability of imported data
 - Postgres/PostGIS data modeling
 - migration-driven schema management
+- geospatial read API design on top of ingestion-driven read models
 
 ## What This Repository Demonstrates
 
 - integration with an OAuth2-protected external API
 - paginated ingestion and raw payload retention
 - normalization into a relational/geospatial model
-- separation between ingestion, persistence, and future read APIs
+- separation between ingestion, persistence, and read APIs
 - backend-first project structure designed for incremental evolution
 
 ## License

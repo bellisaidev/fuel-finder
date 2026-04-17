@@ -1,0 +1,4 @@
+ALTER TABLE station
+    ADD COLUMN city TEXT NULL,
+    ADD COLUMN county TEXT NULL,
+    ADD COLUMN country TEXT NULL;

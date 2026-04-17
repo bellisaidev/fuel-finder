@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 
 public final class PriceUtils {
 
+    private static final BigDecimal GBP_PRICE_THRESHOLD = BigDecimal.TEN;
     private static final BigDecimal PENCE_MULTIPLIER = BigDecimal.valueOf(100);
 
     private PriceUtils() {
@@ -15,8 +16,11 @@ public final class PriceUtils {
             throw new IllegalArgumentException("Price cannot be null");
         }
 
-        return price
-                .multiply(PENCE_MULTIPLIER)
+        BigDecimal normalized = price.compareTo(GBP_PRICE_THRESHOLD) < 0
+                ? price.multiply(PENCE_MULTIPLIER)
+                : price;
+
+        return normalized
                 .setScale(0, RoundingMode.HALF_UP)
                 .intValueExact();
     }

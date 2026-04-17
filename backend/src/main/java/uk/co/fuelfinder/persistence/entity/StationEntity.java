@@ -36,6 +36,15 @@ public class StationEntity {
     @Column(name = "address")
     private String address;
 
+    @Column(name = "city")
+    private String city;
+
+    @Column(name = "county")
+    private String county;
+
+    @Column(name = "country")
+    private String country;
+
     @Column(name = "postcode")
     private String postcode;
 
