@@ -6,15 +6,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
-import uk.co.fuelfinder.persistence.repository.StationQueryRepository;
-import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
 
 import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,15 +20,15 @@ import static org.mockito.Mockito.when;
 class StationQueryServiceTest {
 
     @Mock
-    private StationQueryRepository stationQueryRepository;
+    private CachedStationQueryService cachedStationQueryService;
 
     @InjectMocks
     private StationQueryService stationQueryService;
 
     @Test
-    void returnsMappedNearbyStationsUsingNormalizedInputs() {
+    void returnsNearbyStationsUsingNormalizedInputs() {
         UUID stationId = UUID.randomUUID();
-        NearbyStationProjection projection = new TestNearbyStationProjection(
+        NearbyStationResponse expected = new NearbyStationResponse(
                 stationId,
                 "SITE-1",
                 "Shell",
@@ -44,13 +42,13 @@ class StationQueryServiceTest {
                 321.5
         );
 
-        when(stationQueryRepository.findNearbyStations(
-                eq(51.5),
-                eq(-0.1),
-                eq(2000.0),
-                eq("E10"),
-                eq(10)
-        )).thenReturn(List.of(projection));
+        when(cachedStationQueryService.findNearbyStations(argThat(query ->
+                query.lat() == 51.5
+                        && query.lon() == -0.1
+                        && query.radiusMeters() == 2000L
+                        && query.fuelType().equals("E10")
+                        && query.limit() == 10
+        ))).thenReturn(List.of(expected));
 
         List<NearbyStationResponse> response = stationQueryService.findNearbyStations(
                 51.5,
@@ -67,13 +65,13 @@ class StationQueryServiceTest {
         assertEquals(145, response.getFirst().pricePence());
         assertEquals(321.5, response.getFirst().distanceMeters());
 
-        verify(stationQueryRepository).findNearbyStations(51.5, -0.1, 2000.0, "E10", 10);
+        verify(cachedStationQueryService).findNearbyStations(new NormalizedStationQuery(51.5, -0.1, 2000L, "E10", 10));
     }
 
     @Test
-    void returnsMappedCheapestNearbyStationsUsingPriceFirstOrderingQuery() {
+    void returnsCheapestNearbyStationsUsingPriceFirstOrderingQuery() {
         UUID stationId = UUID.randomUUID();
-        NearbyStationProjection projection = new TestNearbyStationProjection(
+        NearbyStationResponse expected = new NearbyStationResponse(
                 stationId,
                 "SITE-2",
                 "BP",
@@ -87,13 +85,13 @@ class StationQueryServiceTest {
                 950.0
         );
 
-        when(stationQueryRepository.findCheapestNearbyStations(
-                eq(51.5074),
-                eq(-0.1278),
-                eq(5000.0),
-                eq("E5"),
-                eq(5)
-        )).thenReturn(List.of(projection));
+        when(cachedStationQueryService.findCheapestNearbyStations(argThat(query ->
+                query.lat() == 51.5074
+                        && query.lon() == -0.1278
+                        && query.radiusMeters() == 5000L
+                        && query.fuelType().equals("E5")
+                        && query.limit() == 5
+        ))).thenReturn(List.of(expected));
 
         List<NearbyStationResponse> response = stationQueryService.findCheapestNearbyStations(
                 51.5074,
@@ -109,7 +107,32 @@ class StationQueryServiceTest {
         assertEquals(139, response.getFirst().pricePence());
         assertEquals(950.0, response.getFirst().distanceMeters());
 
-        verify(stationQueryRepository).findCheapestNearbyStations(51.5074, -0.1278, 5000.0, "E5", 5);
+        verify(cachedStationQueryService).findCheapestNearbyStations(
+                new NormalizedStationQuery(51.5074, -0.1278, 5000L, "E5", 5)
+        );
+    }
+
+    @Test
+    void normalizesCoordinatesAndRadiusBeforeDelegatingToCachedService() {
+        when(cachedStationQueryService.findNearbyStations(argThat(query ->
+                query.lat() == 51.5074
+                        && query.lon() == -0.1278
+                        && query.radiusMeters() == 2000L
+                        && query.fuelType().equals("E5")
+                        && query.limit() == 10
+        ))).thenReturn(List.of());
+
+        stationQueryService.findNearbyStations(
+                51.5074001,
+                -0.1278001,
+                2000.4,
+                " e5 ",
+                null
+        );
+
+        verify(cachedStationQueryService).findNearbyStations(
+                new NormalizedStationQuery(51.5074, -0.1278, 2000L, "E5", 10)
+        );
     }
 
     @Test
@@ -140,74 +163,5 @@ class StationQueryServiceTest {
         );
 
         assertEquals("limit must be less than or equal to 100", exception.getMessage());
-    }
-
-    private record TestNearbyStationProjection(
-            UUID stationId,
-            String siteId,
-            String brand,
-            String address,
-            String city,
-            String county,
-            String country,
-            String postcode,
-            String fuelType,
-            Integer pricePence,
-            Double distanceMeters
-    ) implements NearbyStationProjection {
-        @Override
-        public UUID getStationId() {
-            return stationId;
-        }
-
-        @Override
-        public String getSiteId() {
-            return siteId;
-        }
-
-        @Override
-        public String getBrand() {
-            return brand;
-        }
-
-        @Override
-        public String getAddress() {
-            return address;
-        }
-
-        @Override
-        public String getCity() {
-            return city;
-        }
-
-        @Override
-        public String getCounty() {
-            return county;
-        }
-
-        @Override
-        public String getCountry() {
-            return country;
-        }
-
-        @Override
-        public String getPostcode() {
-            return postcode;
-        }
-
-        @Override
-        public String getFuelType() {
-            return fuelType;
-        }
-
-        @Override
-        public Integer getPricePence() {
-            return pricePence;
-        }
-
-        @Override
-        public Double getDistanceMeters() {
-            return distanceMeters;
-        }
     }
 }

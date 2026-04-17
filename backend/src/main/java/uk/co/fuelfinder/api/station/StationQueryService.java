@@ -3,9 +3,9 @@ package uk.co.fuelfinder.api.station;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
-import uk.co.fuelfinder.persistence.repository.StationQueryRepository;
-import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 
 @Service
@@ -15,7 +15,7 @@ public class StationQueryService {
     private static final int DEFAULT_LIMIT = 10;
     private static final int MAX_LIMIT = 100;
 
-    private final StationQueryRepository stationQueryRepository;
+    private final CachedStationQueryService cachedStationQueryService;
 
     public List<NearbyStationResponse> findNearbyStations(
             double lat,
@@ -28,19 +28,7 @@ public class StationQueryService {
         validateLon(lon);
         validateRadius(radiusMeters);
 
-        String normalizedFuelType = validateAndNormalizeFuelType(fuelType);
-        int normalizedLimit = normalizeLimit(limit);
-
-        return stationQueryRepository.findNearbyStations(
-                        lat,
-                        lon,
-                        radiusMeters,
-                        normalizedFuelType,
-                        normalizedLimit
-                )
-                .stream()
-                .map(this::toResponse)
-                .toList();
+        return cachedStationQueryService.findNearbyStations(normalizeQuery(lat, lon, radiusMeters, fuelType, limit));
     }
 
     public List<NearbyStationResponse> findCheapestNearbyStations(
@@ -54,35 +42,7 @@ public class StationQueryService {
         validateLon(lon);
         validateRadius(radiusMeters);
 
-        String normalizedFuelType = validateAndNormalizeFuelType(fuelType);
-        int normalizedLimit = normalizeLimit(limit);
-
-        return stationQueryRepository.findCheapestNearbyStations(
-                        lat,
-                        lon,
-                        radiusMeters,
-                        normalizedFuelType,
-                        normalizedLimit
-                )
-                .stream()
-                .map(this::toResponse)
-                .toList();
-    }
-
-    private NearbyStationResponse toResponse(NearbyStationProjection projection) {
-        return new NearbyStationResponse(
-                projection.getStationId(),
-                projection.getSiteId(),
-                projection.getBrand(),
-                projection.getAddress(),
-                projection.getCity(),
-                projection.getCounty(),
-                projection.getCountry(),
-                projection.getPostcode(),
-                projection.getFuelType(),
-                projection.getPricePence(),
-                projection.getDistanceMeters() == null ? 0d : projection.getDistanceMeters()
-        );
+        return cachedStationQueryService.findCheapestNearbyStations(normalizeQuery(lat, lon, radiusMeters, fuelType, limit));
     }
 
     private void validateLat(double lat) {
@@ -123,5 +83,27 @@ public class StationQueryService {
         }
 
         return resolved;
+    }
+
+    private NormalizedStationQuery normalizeQuery(
+            double lat,
+            double lon,
+            double radiusMeters,
+            String fuelType,
+            Integer limit
+    ) {
+        return new NormalizedStationQuery(
+                roundCoordinate(lat),
+                roundCoordinate(lon),
+                Math.round(radiusMeters),
+                validateAndNormalizeFuelType(fuelType),
+                normalizeLimit(limit)
+        );
+    }
+
+    private double roundCoordinate(double value) {
+        return BigDecimal.valueOf(value)
+                .setScale(4, RoundingMode.HALF_UP)
+                .doubleValue();
     }
 }

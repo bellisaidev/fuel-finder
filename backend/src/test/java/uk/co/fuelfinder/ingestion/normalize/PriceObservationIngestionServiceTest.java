@@ -2,10 +2,12 @@ package uk.co.fuelfinder.ingestion.normalize;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.context.ApplicationEventPublisher;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import uk.co.fuelfinder.api.station.LatestPricesChangedEvent;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPriceDto;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
 import uk.co.fuelfinder.persistence.entity.PriceObservationEntity;
@@ -43,6 +45,9 @@ class PriceObservationIngestionServiceTest {
     @Mock
     private LatestPriceProjectionService latestPriceProjectionService;
 
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
+
     @InjectMocks
     private PriceObservationIngestionService priceObservationIngestionService;
 
@@ -77,6 +82,7 @@ class PriceObservationIngestionServiceTest {
         assertEquals("GBP", saved.getCurrency());
         assertEquals(rawFeedFetch, saved.getRawPayload());
         verify(latestPriceProjectionService).upsertFromObservation(saved);
+        verify(applicationEventPublisher).publishEvent(new LatestPricesChangedEvent("price-observation-ingestion"));
     }
 
     @Test
@@ -98,6 +104,7 @@ class PriceObservationIngestionServiceTest {
         assertEquals(0, inserted);
         verify(priceObservationRepository, never()).save(any());
         verify(latestPriceProjectionService, never()).upsertFromObservation(any());
+        verify(applicationEventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -121,6 +128,7 @@ class PriceObservationIngestionServiceTest {
         assertEquals(0, inserted);
         verify(priceObservationRepository, never()).save(any());
         verify(latestPriceProjectionService, never()).upsertFromObservation(any());
+        verify(applicationEventPublisher, never()).publishEvent(any());
     }
 
     @Test

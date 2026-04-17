@@ -2,9 +2,11 @@ package uk.co.fuelfinder.ingestion.normalize;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.context.ApplicationEventPublisher;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import uk.co.fuelfinder.api.station.LatestPricesChangedEvent;
 import uk.co.fuelfinder.persistence.repository.LatestPriceRepository;
 import uk.co.fuelfinder.persistence.repository.PriceObservationRepository;
 
@@ -22,6 +24,9 @@ class LatestPriceProjectionServiceTest {
     @Mock
     private PriceObservationRepository priceObservationRepository;
 
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
+
     @InjectMocks
     private LatestPriceProjectionService latestPriceProjectionService;
 
@@ -35,6 +40,7 @@ class LatestPriceProjectionServiceTest {
 
         assertEquals(3, inserted);
         verify(latestPriceRepository).backfillFromPriceObservations();
+        verify(applicationEventPublisher).publishEvent(new LatestPricesChangedEvent("latest-price-backfill"));
     }
 
     @Test
@@ -46,5 +52,6 @@ class LatestPriceProjectionServiceTest {
         assertEquals(0, inserted);
         verify(priceObservationRepository, never()).count();
         verify(latestPriceRepository, never()).backfillFromPriceObservations();
+        verify(applicationEventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
     }
 }
