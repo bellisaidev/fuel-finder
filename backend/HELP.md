@@ -33,6 +33,13 @@ Available station endpoints:
 
 - `GET /v1/stations/nearby`
 - `GET /v1/stations/cheapest-nearby`
+- `GET /v1/stations/{stationId}`
+
+Station query caching uses local Caffeine caches for:
+
+- `nearbyStations`
+- `cheapestNearbyStations`
+- `stationDetails`
 
 Both endpoints accept:
 
@@ -41,6 +48,10 @@ Both endpoints accept:
 - `radiusMeters`
 - `fuelType`
 - `limit` (optional, default `10`, max `100`)
+
+Station details endpoint accepts:
+
+- `stationId` as UUID path variable
 
 ## Station Location Fields
 

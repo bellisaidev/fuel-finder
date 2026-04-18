@@ -5,8 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.PrecisionModel;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import uk.co.fuelfinder.api.station.StationsChangedEvent;
 import uk.co.fuelfinder.persistence.entity.RetailerEntity;
 import uk.co.fuelfinder.persistence.entity.StationEntity;
 import uk.co.fuelfinder.persistence.repository.StationRepository;
@@ -23,6 +25,7 @@ public class StationUpsertService {
     private static final int WGS84_SRID = 4326;
 
     private final StationRepository stationRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional
     public int upsert(RetailerEntity retailer, NormalizedStation normalizedStation) {
@@ -37,6 +40,7 @@ public class StationUpsertService {
             StationEntity existing = existingOpt.get();
             updateExisting(existing, normalizedStation);
             stationRepository.save(existing);
+            applicationEventPublisher.publishEvent(new StationsChangedEvent("station-upsert"));
 
             log.debug("Updated station: retailer={}, siteId={}", retailer.getName(), normalizedStation.getSiteId());
             return 1;
@@ -44,6 +48,7 @@ public class StationUpsertService {
 
         StationEntity entity = buildNewStation(retailer, normalizedStation);
         stationRepository.save(entity);
+        applicationEventPublisher.publishEvent(new StationsChangedEvent("station-upsert"));
 
         log.debug("Inserted station: retailer={}, siteId={}", retailer.getName(), normalizedStation.getSiteId());
         return 1;

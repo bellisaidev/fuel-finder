@@ -17,14 +17,17 @@ import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import uk.co.fuelfinder.api.ApiRequestLogAttributes;
 import uk.co.fuelfinder.api.dto.ApiErrorResponse;
+import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/v1/stations")
@@ -34,6 +37,38 @@ import java.util.List;
 public class StationQueryController {
 
     private final StationQueryService stationQueryService;
+
+    @GetMapping("/{stationId}")
+    @Operation(
+            summary = "Get station details",
+            description = "Returns the full public details for a single station identified by its UUID, including all latest available prices by fuel type."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Station details found successfully.",
+                    content = @Content(schema = @Schema(implementation = StationDetailsResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid station identifier.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Station not found.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            )
+    })
+    public StationDetailsResponse getStationDetails(
+            @Parameter(description = "Internal station UUID.", example = "123e4567-e89b-12d3-a456-426614174000")
+            @PathVariable UUID stationId,
+            HttpServletRequest request
+    ) {
+        StationDetailsResponse response = stationQueryService.getStationDetails(stationId);
+        request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, 1);
+        return response;
+    }
 
     @GetMapping("/nearby")
     @Operation(

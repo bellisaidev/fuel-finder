@@ -5,6 +5,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import uk.co.fuelfinder.api.StationNotFoundException;
+import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 
 import java.util.List;
@@ -153,5 +155,70 @@ class StationQueryServiceTest {
         );
 
         assertEquals("limit must be less than or equal to 100", exception.getMessage());
+    }
+
+    @Test
+    void returnsStationDetailsWithSortedLatestPrices() {
+        UUID stationId = UUID.randomUUID();
+        StationDetailsResponse expected = new StationDetailsResponse(
+                stationId,
+                "SITE-1",
+                "Shell",
+                "221B Baker Street",
+                "London",
+                "Greater London",
+                "UK",
+                "NW1 6XE",
+                51.5237,
+                -0.1585,
+                List.of()
+        );
+        when(cachedStationQueryService.getStationDetails(stationId)).thenReturn(expected);
+
+        StationDetailsResponse response = stationQueryService.getStationDetails(stationId);
+
+        assertEquals(stationId, response.stationId());
+        assertEquals(51.5237, response.latitude());
+        assertEquals(-0.1585, response.longitude());
+        verify(cachedStationQueryService).getStationDetails(stationId);
+    }
+
+    @Test
+    void returnsStationDetailsWithEmptyLatestPricesWhenNoPricesExist() {
+        UUID stationId = UUID.randomUUID();
+        StationDetailsResponse expected = new StationDetailsResponse(
+                stationId,
+                "SITE-1",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of()
+        );
+        when(cachedStationQueryService.getStationDetails(stationId)).thenReturn(expected);
+
+        StationDetailsResponse response = stationQueryService.getStationDetails(stationId);
+
+        assertEquals(stationId, response.stationId());
+        assertEquals(List.of(), response.latestPrices());
+        verify(cachedStationQueryService).getStationDetails(stationId);
+    }
+
+    @Test
+    void throwsStationNotFoundWhenStationDoesNotExist() {
+        UUID stationId = UUID.randomUUID();
+        when(cachedStationQueryService.getStationDetails(stationId)).thenThrow(new StationNotFoundException(stationId));
+
+        StationNotFoundException exception = assertThrows(
+                StationNotFoundException.class,
+                () -> stationQueryService.getStationDetails(stationId)
+        );
+
+        assertEquals("Station not found: " + stationId, exception.getMessage());
+        verify(cachedStationQueryService).getStationDetails(stationId);
     }
 }

@@ -9,6 +9,8 @@ import java.util.UUID;
 
 public interface StationRepository extends JpaRepository<StationEntity, UUID> {
 
+    Optional<StationEntity> findByIdAndActiveTrue(UUID id);
+
     Optional<StationEntity> findByRetailerIdAndSiteId(UUID retailerId, String siteId);
 
     Optional<StationEntity> findByRetailerAndSiteId(RetailerEntity retailer, String siteId);

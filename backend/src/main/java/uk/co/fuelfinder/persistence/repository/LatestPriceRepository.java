@@ -3,10 +3,22 @@ package uk.co.fuelfinder.persistence.repository;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import uk.co.fuelfinder.persistence.entity.LatestPriceEntity;
 import uk.co.fuelfinder.persistence.entity.LatestPriceId;
 
+import java.util.List;
+import java.util.UUID;
+
 public interface LatestPriceRepository extends JpaRepository<LatestPriceEntity, LatestPriceId> {
+
+    @Query("""
+            SELECT lp
+            FROM LatestPriceEntity lp
+            WHERE lp.station.id = :stationId
+            ORDER BY lp.id.fuelType ASC
+            """)
+    List<LatestPriceEntity> findByStationId(@Param("stationId") UUID stationId);
 
     @Modifying
     @Query(value = """

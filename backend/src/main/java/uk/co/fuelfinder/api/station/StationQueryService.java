@@ -3,8 +3,10 @@ package uk.co.fuelfinder.api.station;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
+import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +35,10 @@ public class StationQueryService {
             Integer limit
     ) {
         return cachedStationQueryService.findCheapestNearbyStations(normalizeQuery(lat, lon, radiusMeters, fuelType, limit));
+    }
+
+    public StationDetailsResponse getStationDetails(UUID stationId) {
+        return cachedStationQueryService.getStationDetails(stationId);
     }
 
     private String validateAndNormalizeFuelType(String fuelType) {
@@ -72,4 +78,5 @@ public class StationQueryService {
                 normalizeLimit(limit)
         );
     }
+
 }

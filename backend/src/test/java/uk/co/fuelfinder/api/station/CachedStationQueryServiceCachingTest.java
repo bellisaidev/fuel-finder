@@ -7,15 +7,29 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cache.CacheManager;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import uk.co.fuelfinder.api.StationNotFoundException;
+import uk.co.fuelfinder.persistence.entity.LatestPriceEntity;
+import uk.co.fuelfinder.persistence.entity.LatestPriceId;
+import uk.co.fuelfinder.persistence.entity.StationEntity;
+import uk.co.fuelfinder.persistence.repository.LatestPriceRepository;
+import uk.co.fuelfinder.persistence.repository.StationRepository;
 import uk.co.fuelfinder.persistence.repository.StationQueryRepository;
 import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
 
+import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.Point;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -29,6 +43,14 @@ class CachedStationQueryServiceCachingTest {
 
     @MockitoBean
     private StationQueryRepository stationQueryRepository;
+
+    @MockitoBean
+    private StationRepository stationRepository;
+
+    @MockitoBean
+    private LatestPriceRepository latestPriceRepository;
+
+    private final GeometryFactory geometryFactory = new GeometryFactory();
 
     @BeforeEach
     void clearCaches() {
@@ -77,6 +99,68 @@ class CachedStationQueryServiceCachingTest {
 
         verify(stationQueryRepository).findNearbyStations(51.5074, -0.1278, 2000L, "E5", 10);
         verify(stationQueryRepository).findNearbyStations(51.5075, -0.1278, 2000L, "E5", 10);
+    }
+
+    @Test
+    void reusesCacheEntryForRepeatedStationDetailsLookups() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        when(stationRepository.findByIdAndActiveTrue(stationId)).thenReturn(Optional.of(station));
+        when(latestPriceRepository.findByStationId(stationId)).thenReturn(List.of(latestPrice(station, "E5", 145)));
+
+        cachedStationQueryService.getStationDetails(stationId);
+        cachedStationQueryService.getStationDetails(stationId);
+
+        verify(stationRepository, times(1)).findByIdAndActiveTrue(stationId);
+        verify(latestPriceRepository, times(1)).findByStationId(stationId);
+    }
+
+    @Test
+    void usesDifferentCacheEntriesForDifferentStationDetailsLookups() {
+        UUID firstStationId = UUID.randomUUID();
+        UUID secondStationId = UUID.randomUUID();
+        StationEntity firstStation = station(firstStationId, "SITE-1");
+        StationEntity secondStation = station(secondStationId, "SITE-2");
+
+        when(stationRepository.findByIdAndActiveTrue(firstStationId)).thenReturn(Optional.of(firstStation));
+        when(stationRepository.findByIdAndActiveTrue(secondStationId)).thenReturn(Optional.of(secondStation));
+        when(latestPriceRepository.findByStationId(firstStationId)).thenReturn(List.of(latestPrice(firstStation, "E5", 145)));
+        when(latestPriceRepository.findByStationId(secondStationId)).thenReturn(List.of(latestPrice(secondStation, "E10", 147)));
+
+        cachedStationQueryService.getStationDetails(firstStationId);
+        cachedStationQueryService.getStationDetails(secondStationId);
+
+        verify(stationRepository).findByIdAndActiveTrue(firstStationId);
+        verify(stationRepository).findByIdAndActiveTrue(secondStationId);
+        verify(latestPriceRepository).findByStationId(firstStationId);
+        verify(latestPriceRepository).findByStationId(secondStationId);
+    }
+
+    @Test
+    void doesNotCacheStationNotFoundException() {
+        UUID stationId = UUID.randomUUID();
+        when(stationRepository.findByIdAndActiveTrue(stationId)).thenReturn(Optional.empty());
+
+        assertThrows(StationNotFoundException.class, () -> cachedStationQueryService.getStationDetails(stationId));
+        assertThrows(StationNotFoundException.class, () -> cachedStationQueryService.getStationDetails(stationId));
+
+        verify(stationRepository, times(2)).findByIdAndActiveTrue(stationId);
+    }
+
+    @Test
+    void queriesRepositoryAgainAfterStationDetailsCacheIsCleared() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        when(stationRepository.findByIdAndActiveTrue(stationId)).thenReturn(Optional.of(station));
+        when(latestPriceRepository.findByStationId(stationId)).thenReturn(List.of(latestPrice(station, "E5", 145)));
+
+        cachedStationQueryService.getStationDetails(stationId);
+        assertNotNull(cacheManager.getCache(STATION_DETAILS_CACHE));
+        cacheManager.getCache(STATION_DETAILS_CACHE).clear();
+        cachedStationQueryService.getStationDetails(stationId);
+
+        verify(stationRepository, times(2)).findByIdAndActiveTrue(stationId);
+        verify(latestPriceRepository, times(2)).findByStationId(stationId);
     }
 
     private static NearbyStationProjection projection() {
@@ -137,5 +221,37 @@ class CachedStationQueryServiceCachingTest {
                 return 321.5;
             }
         };
+    }
+
+    private StationEntity station(UUID stationId, String siteId) {
+        return StationEntity.builder()
+                .id(stationId)
+                .siteId(siteId)
+                .brand("Shell")
+                .address("221B Baker Street")
+                .city("London")
+                .county("Greater London")
+                .country("UK")
+                .postcode("NW1 6XE")
+                .location(point(-0.1585, 51.5237))
+                .active(true)
+                .build();
+    }
+
+    private LatestPriceEntity latestPrice(StationEntity station, String fuelType, int pricePence) {
+        return LatestPriceEntity.builder()
+                .id(new LatestPriceId(station.getId(), fuelType))
+                .station(station)
+                .pricePence(pricePence)
+                .currency("GBP")
+                .observedAt(OffsetDateTime.parse("2026-04-18T10:15:30Z"))
+                .reportedUpdatedAt(OffsetDateTime.parse("2026-04-18T10:10:00Z"))
+                .build();
+    }
+
+    private Point point(double longitude, double latitude) {
+        Point point = geometryFactory.createPoint(new Coordinate(longitude, latitude));
+        point.setSRID(4326);
+        return point;
     }
 }

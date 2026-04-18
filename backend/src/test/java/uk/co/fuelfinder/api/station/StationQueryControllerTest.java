@@ -12,9 +12,13 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import uk.co.fuelfinder.api.ApiRequestLogAttributes;
 import uk.co.fuelfinder.api.ApiExceptionHandler;
+import uk.co.fuelfinder.api.StationNotFoundException;
+import uk.co.fuelfinder.api.station.dto.LatestStationPriceResponse;
 import uk.co.fuelfinder.config.StationQueryApiLoggingConfig;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
+import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -37,6 +41,74 @@ class StationQueryControllerTest {
 
     @MockBean
     private StationQueryService stationQueryService;
+
+    @Test
+    void returnsStationDetailsForValidStationId(CapturedOutput output) throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        when(stationQueryService.getStationDetails(stationId))
+                .thenReturn(new StationDetailsResponse(
+                        stationId,
+                        "SITE-1",
+                        "Shell",
+                        "221B Baker Street",
+                        "London",
+                        "Greater London",
+                        "UK",
+                        "NW1 6XE",
+                        51.5237,
+                        -0.1585,
+                        List.of(
+                                new LatestStationPriceResponse(
+                                        "E10",
+                                        147,
+                                        OffsetDateTime.parse("2026-04-18T10:15:30Z"),
+                                        OffsetDateTime.parse("2026-04-18T10:10:00Z")
+                                )
+                        )
+                ));
+
+        mockMvc.perform(get("/v1/stations/{stationId}", stationId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.stationId").value(stationId.toString()))
+                .andExpect(jsonPath("$.latitude").value(51.5237))
+                .andExpect(jsonPath("$.longitude").value(-0.1585))
+                .andExpect(jsonPath("$.latestPrices[0].fuelType").value("E10"))
+                .andExpect(jsonPath("$.latestPrices[0].pricePence").value(147))
+                .andExpect(request().attribute(ApiRequestLogAttributes.RESULT_COUNT, 1));
+
+        assertLogContains(output, "event=station_query_completed");
+        assertLogContains(output, "path=/v1/stations/" + stationId);
+        assertLogContains(output, "status=200");
+        assertLogContains(output, "resultCount=1");
+    }
+
+    @Test
+    void returnsBadRequestForInvalidStationId() throws Exception {
+        mockMvc.perform(get("/v1/stations/not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("stationId has an invalid value"))
+                .andExpect(request().attribute(ApiRequestLogAttributes.ERROR_MESSAGE, "stationId has an invalid value"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsNotFoundWhenStationDoesNotExist(CapturedOutput output) throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        when(stationQueryService.getStationDetails(stationId))
+                .thenThrow(new StationNotFoundException(stationId));
+
+        mockMvc.perform(get("/v1/stations/{stationId}", stationId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Station not found: " + stationId))
+                .andExpect(request().attribute(ApiRequestLogAttributes.ERROR_MESSAGE, "Station not found: " + stationId));
+
+        assertLogContains(output, "event=station_query_not_found");
+        assertLogContains(output, "path=/v1/stations/" + stationId);
+        assertLogContains(output, "status=404");
+        assertLogContains(output, "error=Station not found: " + stationId);
+    }
 
     @Test
     void returnsEmptyArrayWhenNearbyQueryFindsNoStations(CapturedOutput output) throws Exception {

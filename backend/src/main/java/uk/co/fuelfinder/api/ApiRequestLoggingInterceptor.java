@@ -56,6 +56,23 @@ public class ApiRequestLoggingInterceptor implements HandlerInterceptor {
                     durationMs,
                     resolveErrorMessage(request)
             );
+            return;
+        }
+
+        if (status == HttpServletResponse.SC_NOT_FOUND) {
+            log.warn(
+                    "event=station_query_not_found method={} path={} lat={} lon={} radiusMeters={} fuelType={} limit={} status={} durationMs={} error={}",
+                    request.getMethod(),
+                    request.getRequestURI(),
+                    request.getParameter("lat"),
+                    request.getParameter("lon"),
+                    request.getParameter("radiusMeters"),
+                    request.getParameter("fuelType"),
+                    request.getParameter("limit"),
+                    status,
+                    durationMs,
+                    resolveErrorMessage(request)
+            );
         }
     }
 
