@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import uk.co.fuelfinder.api.ApiRequestLogAttributes;
 import uk.co.fuelfinder.api.dto.ApiErrorResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 
@@ -68,15 +70,18 @@ public class StationQueryController {
             @Parameter(description = "Maximum number of results. Defaults to 10, maximum 100.", example = "10")
             @Positive(message = "limit must be greater than 0")
             @Max(value = 100, message = "limit must be less than or equal to 100")
-            @RequestParam(required = false) Integer limit
+            @RequestParam(required = false) Integer limit,
+            HttpServletRequest request
     ) {
-        return stationQueryService.findNearbyStations(
+        List<NearbyStationResponse> response = stationQueryService.findNearbyStations(
                 lat,
                 lon,
                 radiusMeters,
                 fuelType,
                 limit
         );
+        request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, response.size());
+        return response;
     }
 
     @GetMapping("/cheapest-nearby")
@@ -114,14 +119,17 @@ public class StationQueryController {
             @Parameter(description = "Maximum number of results. Defaults to 10, maximum 100.", example = "10")
             @Positive(message = "limit must be greater than 0")
             @Max(value = 100, message = "limit must be less than or equal to 100")
-            @RequestParam(required = false) Integer limit
+            @RequestParam(required = false) Integer limit,
+            HttpServletRequest request
     ) {
-        return stationQueryService.findCheapestNearbyStations(
+        List<NearbyStationResponse> response = stationQueryService.findCheapestNearbyStations(
                 lat,
                 lon,
                 radiusMeters,
                 fuelType,
                 limit
         );
+        request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, response.size());
+        return response;
     }
 }
