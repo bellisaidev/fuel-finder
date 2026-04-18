@@ -19,6 +19,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -37,12 +38,14 @@ class StationQueryCacheInvalidationIntegrationTest {
     void resetCaches() {
         clearCache(NEARBY_STATIONS_CACHE);
         clearCache(CHEAPEST_NEARBY_STATIONS_CACHE);
+        clearCache(STATION_DETAILS_CACHE);
     }
 
     @Test
     void clearsCachesAfterCommit() {
         putValue(NEARBY_STATIONS_CACHE, "k1", "v1");
         putValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2", "v2");
+        putValue(STATION_DETAILS_CACHE, "k3", "v3");
 
         transactionTemplate.executeWithoutResult(status ->
                 applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("test"))
@@ -50,20 +53,35 @@ class StationQueryCacheInvalidationIntegrationTest {
 
         assertEquals(null, getValue(NEARBY_STATIONS_CACHE, "k1"));
         assertEquals(null, getValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2"));
+        assertEquals(null, getValue(STATION_DETAILS_CACHE, "k3"));
+    }
+
+    @Test
+    void clearsStationDetailsCacheAfterStationChangeCommit() {
+        putValue(STATION_DETAILS_CACHE, "k3", "v3");
+
+        transactionTemplate.executeWithoutResult(status ->
+                applicationEventPublisher.publishEvent(new StationsChangedEvent("test"))
+        );
+
+        assertEquals(null, getValue(STATION_DETAILS_CACHE, "k3"));
     }
 
     @Test
     void doesNotClearCachesWhenTransactionRollsBack() {
         putValue(NEARBY_STATIONS_CACHE, "k1", "v1");
         putValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2", "v2");
+        putValue(STATION_DETAILS_CACHE, "k3", "v3");
 
         transactionTemplate.executeWithoutResult(status -> {
             applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("test"));
+            applicationEventPublisher.publishEvent(new StationsChangedEvent("test"));
             status.setRollbackOnly();
         });
 
         assertEquals("v1", getValue(NEARBY_STATIONS_CACHE, "k1"));
         assertEquals("v2", getValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2"));
+        assertEquals("v3", getValue(STATION_DETAILS_CACHE, "k3"));
     }
 
     @TestConfiguration

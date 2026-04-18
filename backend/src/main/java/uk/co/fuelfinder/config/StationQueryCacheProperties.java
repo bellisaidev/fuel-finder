@@ -7,7 +7,8 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "fuelfinder.cache")
 public record StationQueryCacheProperties(
         CacheSpec nearby,
-        CacheSpec cheapestNearby
+        CacheSpec cheapestNearby,
+        CacheSpec details
 ) {
 
     public record CacheSpec(

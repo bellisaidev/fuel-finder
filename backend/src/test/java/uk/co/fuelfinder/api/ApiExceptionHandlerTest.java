@@ -83,6 +83,23 @@ class ApiExceptionHandlerTest {
         assertEquals("radiusMeters must be greater than 0", request.getAttribute(ApiRequestLogAttributes.ERROR_MESSAGE));
     }
 
+    @Test
+    void returnsNotFoundPayloadForStationNotFoundException() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        ApiErrorResponse response = apiExceptionHandler.handleStationNotFound(
+                new StationNotFoundException(java.util.UUID.fromString("123e4567-e89b-12d3-a456-426614174000")),
+                request
+        );
+
+        assertEquals(404, response.status());
+        assertEquals("Not Found", response.error());
+        assertEquals("Station not found: 123e4567-e89b-12d3-a456-426614174000", response.message());
+        assertEquals(
+                "Station not found: 123e4567-e89b-12d3-a456-426614174000",
+                request.getAttribute(ApiRequestLogAttributes.ERROR_MESSAGE)
+        );
+    }
+
     private static final class SampleController {
 
         @SuppressWarnings("unused")

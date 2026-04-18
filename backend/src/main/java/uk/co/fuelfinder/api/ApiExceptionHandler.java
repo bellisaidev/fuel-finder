@@ -74,6 +74,15 @@ public class ApiExceptionHandler {
         return badRequest(request, message);
     }
 
+    @ExceptionHandler(StationNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiErrorResponse handleStationNotFound(
+            StationNotFoundException ex,
+            HttpServletRequest request
+    ) {
+        return error(request, HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
     private String extractValidationMessage(ParameterValidationResult result) {
         List<MessageSourceResolvable> errors = result.getResolvableErrors();
         if (errors.isEmpty()) {
@@ -88,11 +97,15 @@ public class ApiExceptionHandler {
     }
 
     private ApiErrorResponse badRequest(HttpServletRequest request, String message) {
+        return error(request, HttpStatus.BAD_REQUEST, message);
+    }
+
+    private ApiErrorResponse error(HttpServletRequest request, HttpStatus status, String message) {
         request.setAttribute(ApiRequestLogAttributes.ERROR_MESSAGE, message);
         return new ApiErrorResponse(
                 OffsetDateTime.now().toString(),
-                HttpStatus.BAD_REQUEST.value(),
-                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                status.value(),
+                status.getReasonPhrase(),
                 message
         );
     }

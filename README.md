@@ -129,6 +129,7 @@ Currently available read endpoints:
 
 - `GET /v1/stations/nearby`
 - `GET /v1/stations/cheapest-nearby`
+- `GET /v1/stations/{stationId}`
 
 Both endpoints accept:
 
@@ -137,6 +138,10 @@ Both endpoints accept:
 - `radiusMeters`
 - `fuelType`
 - `limit` optional, default `10`, max `100`
+
+Station details endpoint accepts:
+
+- `stationId` path variable as UUID
 
 Example:
 
@@ -148,17 +153,24 @@ http://localhost:8080/v1/stations/nearby?lat=51.5074&lon=-0.1278&radiusMeters=50
 http://localhost:8080/v1/stations/cheapest-nearby?lat=51.5074&lon=-0.1278&radiusMeters=5000&fuelType=E5&limit=10
 ```
 
+```text
+http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000
+```
+
 Behavior:
 
 - `/nearby` sorts primarily by distance, then price
 - `/cheapest-nearby` sorts primarily by price, then distance
+- `/v1/stations/{stationId}` returns a single station with full address, coordinates, and all latest prices by fuel type
 - valid queries with no matches return `200 OK` with `[]`
+- a valid station detail lookup with no latest prices returns `200 OK` with `latestPrices: []`
 - both endpoints are cached in-memory for repeated equivalent queries
 - cache keys are based on normalized query input: trimmed/uppercased `fuelType` and resolved default `limit`
 - caches are invalidated after transaction commit when the `latest_price` read model changes
 - invalid, missing, or non-parseable parameters return HTTP `400` via a global API exception handler
 - successful requests emit a single structured `info` log with path, query parameters, status, duration, and result count
 - invalid requests emit a single structured `warn` log with the same request context plus a synthesized validation error message
+- station detail requests for unknown UUIDs return `404 Not Found` with the standard API error payload
 
 ### OpenAPI / Swagger
 
@@ -244,6 +256,12 @@ Cheapest nearby stations:
 http://localhost:8080/v1/stations/cheapest-nearby?lat=51.5074&lon=-0.1278&radiusMeters=5000&fuelType=E5&limit=10
 ```
 
+Station details:
+
+```text
+http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000
+```
+
 ## Configuration Notes
 
 - Base application settings live in [`backend/src/main/resources/application.yaml`](backend/src/main/resources/application.yaml)
@@ -263,12 +281,17 @@ Current defaults in [`backend/src/main/resources/application.yaml`](backend/src/
 - `fuelfinder.cache.nearby.max-size=500`
 - `fuelfinder.cache.cheapest-nearby.ttl=60s`
 - `fuelfinder.cache.cheapest-nearby.max-size=500`
+- `fuelfinder.cache.details.ttl=90s`
+- `fuelfinder.cache.details.max-size=1000`
 
 Notes:
 
 - the cache is local to each application instance
 - cache entries are evicted automatically after `60s`
-- both station-query caches are cleared after a successful transaction commit that changes the `latest_price` read model
+- station detail responses are cached separately by `stationId`
+- detail-cache TTL should stay moderate because the payload includes latest prices as well as station metadata
+- all station-query caches are cleared after a successful transaction commit that changes the `latest_price` read model
+- the station-details cache is also cleared after a successful transaction commit that changes station metadata
 - equivalent requests such as `fuelType=e5` and `fuelType=E5` reuse the same cache entry after normalization
 
 ## Testing
