@@ -1,6 +1,7 @@
 package uk.co.fuelfinder.api;
 
 import jakarta.validation.ConstraintViolationException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.method.ParameterValidationResult;
@@ -21,44 +22,56 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiErrorResponse handleIllegalArgument(IllegalArgumentException ex) {
-        return badRequest(ex.getMessage());
+    public ApiErrorResponse handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
+        return badRequest(request, ex.getMessage());
     }
 
     @ExceptionHandler(HandlerMethodValidationException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiErrorResponse handleHandlerMethodValidation(HandlerMethodValidationException ex) {
+    public ApiErrorResponse handleHandlerMethodValidation(
+            HandlerMethodValidationException ex,
+            HttpServletRequest request
+    ) {
         String message = ex.getParameterValidationResults().stream()
                 .map(this::extractValidationMessage)
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse("Request parameter validation failed");
 
-        return badRequest(message);
+        return badRequest(request, message);
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiErrorResponse handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException ex) {
-        return badRequest(ex.getName() + " has an invalid value");
+    public ApiErrorResponse handleMethodArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException ex,
+            HttpServletRequest request
+    ) {
+        return badRequest(request, ex.getName() + " has an invalid value");
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiErrorResponse handleMissingServletRequestParameter(MissingServletRequestParameterException ex) {
-        return badRequest(ex.getParameterName() + " is required");
+    public ApiErrorResponse handleMissingServletRequestParameter(
+            MissingServletRequestParameterException ex,
+            HttpServletRequest request
+    ) {
+        return badRequest(request, ex.getParameterName() + " is required");
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiErrorResponse handleConstraintViolation(ConstraintViolationException ex) {
+    public ApiErrorResponse handleConstraintViolation(
+            ConstraintViolationException ex,
+            HttpServletRequest request
+    ) {
         String message = ex.getConstraintViolations().stream()
                 .map(violation -> violation.getMessage())
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse("Request parameter validation failed");
 
-        return badRequest(message);
+        return badRequest(request, message);
     }
 
     private String extractValidationMessage(ParameterValidationResult result) {
@@ -74,7 +87,8 @@ public class ApiExceptionHandler {
                 .orElse(null);
     }
 
-    private ApiErrorResponse badRequest(String message) {
+    private ApiErrorResponse badRequest(HttpServletRequest request, String message) {
+        request.setAttribute(ApiRequestLogAttributes.ERROR_MESSAGE, message);
         return new ApiErrorResponse(
                 OffsetDateTime.now().toString(),
                 HttpStatus.BAD_REQUEST.value(),
