@@ -19,6 +19,7 @@ What is implemented today:
 - Geospatial read APIs for nearby stations and cheapest nearby stations
 - Local Caffeine caching for repeated geospatial read queries with transaction-safe invalidation after latest-price updates
 - Global API error handling for invalid query parameters
+- Lightweight operational logging for public station queries with success timing/result counts and consistent `400` warnings
 - Station persistence enriched with `address`, `city`, `county`, `country`, and `postcode`
 - Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
 - Unit tests with JUnit 5 and Mockito across auth, client, normalization, exception, and ingestion orchestration components
@@ -156,6 +157,8 @@ Behavior:
 - cache keys are based on normalized query input: trimmed/uppercased `fuelType` and resolved default `limit`
 - caches are invalidated after transaction commit when the `latest_price` read model changes
 - invalid, missing, or non-parseable parameters return HTTP `400` via a global API exception handler
+- successful requests emit a single structured `info` log with path, query parameters, status, duration, and result count
+- invalid requests emit a single structured `warn` log with the same request context plus a synthesized validation error message
 
 ### OpenAPI / Swagger
 
@@ -348,7 +351,7 @@ Near-term priorities:
 - extend integration tests to cover more ingestion edge cases and failure paths
 - raise and enforce JaCoCo coverage thresholds over time
 - align or remove unused JDBC write paths
-- improve operational visibility and ingestion diagnostics
+- deepen observability beyond the current API request logging and ingestion diagnostics
 
 ## Why This Project
 
