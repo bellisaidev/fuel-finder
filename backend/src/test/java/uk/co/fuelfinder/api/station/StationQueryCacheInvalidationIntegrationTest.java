@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -39,6 +40,7 @@ class StationQueryCacheInvalidationIntegrationTest {
         clearCache(NEARBY_STATIONS_CACHE);
         clearCache(CHEAPEST_NEARBY_STATIONS_CACHE);
         clearCache(STATION_DETAILS_CACHE);
+        clearCache(STATION_PRICE_HISTORY_CACHE);
     }
 
     @Test
@@ -57,6 +59,17 @@ class StationQueryCacheInvalidationIntegrationTest {
     }
 
     @Test
+    void clearsStationPriceHistoryCacheAfterPriceObservationChangeCommit() {
+        putValue(STATION_PRICE_HISTORY_CACHE, "k4", "v4");
+
+        transactionTemplate.executeWithoutResult(status ->
+                applicationEventPublisher.publishEvent(new PriceObservationsChangedEvent("test"))
+        );
+
+        assertEquals(null, getValue(STATION_PRICE_HISTORY_CACHE, "k4"));
+    }
+
+    @Test
     void clearsStationDetailsCacheAfterStationChangeCommit() {
         putValue(STATION_DETAILS_CACHE, "k3", "v3");
 
@@ -72,9 +85,11 @@ class StationQueryCacheInvalidationIntegrationTest {
         putValue(NEARBY_STATIONS_CACHE, "k1", "v1");
         putValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2", "v2");
         putValue(STATION_DETAILS_CACHE, "k3", "v3");
+        putValue(STATION_PRICE_HISTORY_CACHE, "k4", "v4");
 
         transactionTemplate.executeWithoutResult(status -> {
             applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("test"));
+            applicationEventPublisher.publishEvent(new PriceObservationsChangedEvent("test"));
             applicationEventPublisher.publishEvent(new StationsChangedEvent("test"));
             status.setRollbackOnly();
         });
@@ -82,6 +97,7 @@ class StationQueryCacheInvalidationIntegrationTest {
         assertEquals("v1", getValue(NEARBY_STATIONS_CACHE, "k1"));
         assertEquals("v2", getValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2"));
         assertEquals("v3", getValue(STATION_DETAILS_CACHE, "k3"));
+        assertEquals("v4", getValue(STATION_PRICE_HISTORY_CACHE, "k4"));
     }
 
     @TestConfiguration

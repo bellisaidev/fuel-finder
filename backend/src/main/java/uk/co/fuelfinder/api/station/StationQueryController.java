@@ -9,13 +9,14 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,7 +26,9 @@ import uk.co.fuelfinder.api.ApiRequestLogAttributes;
 import uk.co.fuelfinder.api.dto.ApiErrorResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -67,6 +70,57 @@ public class StationQueryController {
     ) {
         StationDetailsResponse response = stationQueryService.getStationDetails(stationId);
         request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, 1);
+        return response;
+    }
+
+    @GetMapping("/{stationId}/price-history")
+    @Operation(
+            summary = "Get station price history",
+            description = "Returns historical price observations for a single station and fuel type, ordered from newest to oldest."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Station price history found successfully.",
+                    content = @Content(schema = @Schema(implementation = StationPriceHistoryResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid station identifier or query parameters.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Station not found.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            )
+    })
+    public StationPriceHistoryResponse getStationPriceHistory(
+            @Parameter(description = "Internal station UUID.", example = "123e4567-e89b-12d3-a456-426614174000")
+            @PathVariable UUID stationId,
+            @Parameter(description = "Fuel type code to filter by.", example = "E5")
+            @NotBlank(message = "fuelType must not be blank")
+            @RequestParam String fuelType,
+            @Parameter(description = "Inclusive lower bound for observedAt in ISO-8601 format.", example = "2026-04-18T00:00:00Z")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            @RequestParam(required = false) OffsetDateTime from,
+            @Parameter(description = "Inclusive upper bound for observedAt in ISO-8601 format.", example = "2026-04-19T00:00:00Z")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            @RequestParam(required = false) OffsetDateTime to,
+            @Parameter(description = "Maximum number of observations. Defaults to 100, maximum 1000.", example = "100")
+            @Positive(message = "limit must be greater than 0")
+            @Max(value = 1000, message = "limit must be less than or equal to 1000")
+            @RequestParam(required = false) Integer limit,
+            HttpServletRequest request
+    ) {
+        StationPriceHistoryResponse response = stationQueryService.getStationPriceHistory(
+                stationId,
+                fuelType,
+                from,
+                to,
+                limit
+        );
+        request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, response.observations().size());
         return response;
     }
 

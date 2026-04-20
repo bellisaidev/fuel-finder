@@ -8,7 +8,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import uk.co.fuelfinder.api.StationNotFoundException;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceObservationResponse;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -220,5 +223,114 @@ class StationQueryServiceTest {
 
         assertEquals("Station not found: " + stationId, exception.getMessage());
         verify(cachedStationQueryService).getStationDetails(stationId);
+    }
+
+    @Test
+    void returnsStationPriceHistoryUsingNormalizedInputs() {
+        UUID stationId = UUID.randomUUID();
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+        StationPriceHistoryResponse expected = new StationPriceHistoryResponse(
+                stationId,
+                "E5",
+                from,
+                to,
+                List.of(new StationPriceObservationResponse(145, OffsetDateTime.parse("2026-04-18T10:15:30Z")))
+        );
+
+        when(cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                100
+        ))).thenReturn(expected);
+
+        StationPriceHistoryResponse response = stationQueryService.getStationPriceHistory(
+                stationId,
+                " e5 ",
+                from,
+                to,
+                null
+        );
+
+        assertEquals(stationId, response.stationId());
+        assertEquals("E5", response.fuelType());
+        assertEquals(1, response.observations().size());
+        verify(cachedStationQueryService).getStationPriceHistory(new NormalizedStationPriceHistoryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                100
+        ));
+    }
+
+    @Test
+    void rejectsHistoryLimitAboveMaximum() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.getStationPriceHistory(
+                        UUID.randomUUID(),
+                        "E5",
+                        null,
+                        null,
+                        1001
+                )
+        );
+
+        assertEquals("limit must be less than or equal to 1000", exception.getMessage());
+    }
+
+    @Test
+    void rejectsHistoryRangeWhenFromIsAfterTo() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.getStationPriceHistory(
+                        UUID.randomUUID(),
+                        "E5",
+                        OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                        OffsetDateTime.parse("2026-04-18T00:00:00Z"),
+                        100
+                )
+        );
+
+        assertEquals("from must be less than or equal to to", exception.getMessage());
+    }
+
+    @Test
+    void preservesInactiveStationHistoryLookupByDelegatingWithoutActiveFilter() {
+        UUID stationId = UUID.randomUUID();
+        StationPriceHistoryResponse expected = new StationPriceHistoryResponse(
+                stationId,
+                "E5",
+                null,
+                null,
+                List.of()
+        );
+        when(cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(
+                stationId,
+                "E5",
+                null,
+                null,
+                100
+        ))).thenReturn(expected);
+
+        StationPriceHistoryResponse response = stationQueryService.getStationPriceHistory(
+                stationId,
+                "E5",
+                null,
+                null,
+                null
+        );
+
+        assertEquals(stationId, response.stationId());
+        verify(cachedStationQueryService).getStationPriceHistory(new NormalizedStationPriceHistoryQuery(
+                stationId,
+                "E5",
+                null,
+                null,
+                100
+        ));
     }
 }
