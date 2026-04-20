@@ -6,6 +6,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import uk.co.fuelfinder.api.station.LatestPricesChangedEvent;
+import uk.co.fuelfinder.api.station.PriceObservationsChangedEvent;
 import uk.co.fuelfinder.common.HashingUtils;
 import uk.co.fuelfinder.common.PriceUtils;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
@@ -101,6 +102,7 @@ public class PriceObservationIngestionService {
         );
 
         if (inserted > 0) {
+            applicationEventPublisher.publishEvent(new PriceObservationsChangedEvent("price-observation-ingestion"));
             applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("price-observation-ingestion"));
         }
 

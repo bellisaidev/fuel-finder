@@ -17,6 +17,8 @@ import uk.co.fuelfinder.api.station.dto.LatestStationPriceResponse;
 import uk.co.fuelfinder.config.StationQueryApiLoggingConfig;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceObservationResponse;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -108,6 +110,145 @@ class StationQueryControllerTest {
         assertLogContains(output, "path=/v1/stations/" + stationId);
         assertLogContains(output, "status=404");
         assertLogContains(output, "error=Station not found: " + stationId);
+    }
+
+    @Test
+    void returnsStationPriceHistoryForValidRequest(CapturedOutput output) throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+
+        when(stationQueryService.getStationPriceHistory(stationId, "E5", from, to, 100))
+                .thenReturn(new StationPriceHistoryResponse(
+                        stationId,
+                        "E5",
+                        from,
+                        to,
+                        List.of(new StationPriceObservationResponse(
+                                145,
+                                OffsetDateTime.parse("2026-04-18T10:15:30Z")
+                        ))
+                ));
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId)
+                        .param("fuelType", "E5")
+                        .param("from", "2026-04-18T00:00:00Z")
+                        .param("to", "2026-04-19T00:00:00Z")
+                        .param("limit", "100"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.stationId").value(stationId.toString()))
+                .andExpect(jsonPath("$.fuelType").value("E5"))
+                .andExpect(jsonPath("$.observations[0].pricePence").value(145))
+                .andExpect(request().attribute(ApiRequestLogAttributes.RESULT_COUNT, 1));
+
+        assertLogContains(output, "event=station_query_completed");
+        assertLogContains(output, "path=/v1/stations/" + stationId + "/price-history");
+        assertLogContains(output, "status=200");
+        assertLogContains(output, "resultCount=1");
+    }
+
+    @Test
+    void returnsBadRequestForMissingHistoryFuelType() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("fuelType is required"))
+                .andExpect(request().attribute(ApiRequestLogAttributes.ERROR_MESSAGE, "fuelType is required"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsBadRequestForBlankHistoryFuelType() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId)
+                        .param("fuelType", "   "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("fuelType must not be blank"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsBadRequestForInvalidHistoryLimit() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId)
+                        .param("fuelType", "E5")
+                        .param("limit", "1001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("limit must be less than or equal to 1000"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsBadRequestForInvalidHistoryFromFormat() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId)
+                        .param("fuelType", "E5")
+                        .param("from", "yesterday"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("from has an invalid value"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsBadRequestForHistoryRangeWhenFromIsAfterTo() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        when(stationQueryService.getStationPriceHistory(
+                stationId,
+                "E5",
+                OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-18T00:00:00Z"),
+                null
+        )).thenThrow(new IllegalArgumentException("from must be less than or equal to to"));
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId)
+                        .param("fuelType", "E5")
+                        .param("from", "2026-04-19T00:00:00Z")
+                        .param("to", "2026-04-18T00:00:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("from must be less than or equal to to"));
+    }
+
+    @Test
+    void returnsNotFoundForUnknownStationPriceHistory() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        when(stationQueryService.getStationPriceHistory(stationId, "E5", null, null, null))
+                .thenThrow(new StationNotFoundException(stationId));
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId)
+                        .param("fuelType", "E5"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Station not found: " + stationId));
+    }
+
+    @Test
+    void returnsEmptyObservationsWhenStationPriceHistoryHasNoMatches() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        when(stationQueryService.getStationPriceHistory(stationId, "E5", null, null, null))
+                .thenReturn(new StationPriceHistoryResponse(
+                        stationId,
+                        "E5",
+                        null,
+                        null,
+                        List.of()
+                ));
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history", stationId)
+                        .param("fuelType", "E5"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.stationId").value(stationId.toString()))
+                .andExpect(jsonPath("$.observations").isArray())
+                .andExpect(jsonPath("$.observations").isEmpty())
+                .andExpect(request().attribute(ApiRequestLogAttributes.RESULT_COUNT, 0));
     }
 
     @Test

@@ -8,6 +8,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import uk.co.fuelfinder.api.station.LatestPricesChangedEvent;
+import uk.co.fuelfinder.api.station.PriceObservationsChangedEvent;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPriceDto;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
 import uk.co.fuelfinder.persistence.entity.PriceObservationEntity;
@@ -82,6 +83,7 @@ class PriceObservationIngestionServiceTest {
         assertEquals("GBP", saved.getCurrency());
         assertEquals(rawFeedFetch, saved.getRawPayload());
         verify(latestPriceProjectionService).upsertFromObservation(saved);
+        verify(applicationEventPublisher).publishEvent(new PriceObservationsChangedEvent("price-observation-ingestion"));
         verify(applicationEventPublisher).publishEvent(new LatestPricesChangedEvent("price-observation-ingestion"));
     }
 

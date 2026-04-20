@@ -10,8 +10,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import uk.co.fuelfinder.api.StationNotFoundException;
 import uk.co.fuelfinder.persistence.entity.LatestPriceEntity;
 import uk.co.fuelfinder.persistence.entity.LatestPriceId;
+import uk.co.fuelfinder.persistence.entity.PriceObservationEntity;
 import uk.co.fuelfinder.persistence.entity.StationEntity;
 import uk.co.fuelfinder.persistence.repository.LatestPriceRepository;
+import uk.co.fuelfinder.persistence.repository.PriceObservationRepository;
 import uk.co.fuelfinder.persistence.repository.StationRepository;
 import uk.co.fuelfinder.persistence.repository.StationQueryRepository;
 import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
@@ -23,6 +25,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,6 +34,7 @@ import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -49,6 +54,9 @@ class CachedStationQueryServiceCachingTest {
 
     @MockitoBean
     private LatestPriceRepository latestPriceRepository;
+
+    @MockitoBean
+    private PriceObservationRepository priceObservationRepository;
 
     private final GeometryFactory geometryFactory = new GeometryFactory();
 
@@ -163,6 +171,185 @@ class CachedStationQueryServiceCachingTest {
         verify(latestPriceRepository, times(2)).findByStationId(stationId);
     }
 
+    @Test
+    void reusesCacheEntryForRepeatedStationPriceHistoryLookups() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+        NormalizedStationPriceHistoryQuery query = new NormalizedStationPriceHistoryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                100
+        );
+
+        when(stationRepository.findById(stationId)).thenReturn(Optional.of(station));
+        when(priceObservationRepository.findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        ))
+                .thenReturn(List.of(priceObservation(station, "E5", 145, OffsetDateTime.parse("2026-04-18T10:15:30Z"))));
+
+        cachedStationQueryService.getStationPriceHistory(query);
+        cachedStationQueryService.getStationPriceHistory(query);
+
+        verify(stationRepository, times(1)).findById(stationId);
+        verify(priceObservationRepository, times(1)).findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        );
+    }
+
+    @Test
+    void usesDifferentCacheEntriesForDifferentStationPriceHistoryQueries() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+
+        when(stationRepository.findById(stationId)).thenReturn(Optional.of(station));
+        when(priceObservationRepository.findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        ))
+                .thenReturn(List.of(priceObservation(station, "E5", 145, OffsetDateTime.parse("2026-04-18T10:15:30Z"))));
+        when(priceObservationRepository.findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("B7"),
+                eq(from),
+                eq(to),
+                any()
+        ))
+                .thenReturn(List.of(priceObservation(station, "B7", 155, OffsetDateTime.parse("2026-04-18T10:20:30Z"))));
+
+        cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(stationId, "E5", from, to, 100));
+        cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(stationId, "B7", from, to, 100));
+
+        verify(stationRepository, times(2)).findById(stationId);
+        verify(priceObservationRepository).findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        );
+        verify(priceObservationRepository).findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("B7"),
+                eq(from),
+                eq(to),
+                any()
+        );
+    }
+
+    @Test
+    void queriesRepositoryAgainAfterStationPriceHistoryCacheIsCleared() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+        NormalizedStationPriceHistoryQuery query = new NormalizedStationPriceHistoryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                100
+        );
+
+        when(stationRepository.findById(stationId)).thenReturn(Optional.of(station));
+        when(priceObservationRepository.findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        ))
+                .thenReturn(List.of(priceObservation(station, "E5", 145, OffsetDateTime.parse("2026-04-18T10:15:30Z"))));
+
+        cachedStationQueryService.getStationPriceHistory(query);
+        assertNotNull(cacheManager.getCache(STATION_PRICE_HISTORY_CACHE));
+        cacheManager.getCache(STATION_PRICE_HISTORY_CACHE).clear();
+        cachedStationQueryService.getStationPriceHistory(query);
+
+        verify(stationRepository, times(2)).findById(stationId);
+        verify(priceObservationRepository, times(2)).findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        );
+    }
+
+    @Test
+    void usesDifferentCacheEntriesForDifferentStationPriceHistoryRangesAndLimits() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime laterFrom = OffsetDateTime.parse("2026-04-18T06:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+
+        when(stationRepository.findById(stationId)).thenReturn(Optional.of(station));
+        when(priceObservationRepository.findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        )).thenReturn(List.of(priceObservation(station, "E5", 145, OffsetDateTime.parse("2026-04-18T10:15:30Z"))));
+        when(priceObservationRepository.findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(laterFrom),
+                eq(to),
+                any()
+        )).thenReturn(List.of(priceObservation(station, "E5", 144, OffsetDateTime.parse("2026-04-18T10:15:30Z"))));
+        when(priceObservationRepository.findByStationIdAndFuelTypeAndObservedAtGreaterThanEqualOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                any()
+        )).thenReturn(List.of(priceObservation(station, "E5", 143, OffsetDateTime.parse("2026-04-18T10:15:30Z"))));
+
+        cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(stationId, "E5", from, to, 100));
+        cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(stationId, "E5", laterFrom, to, 100));
+        cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(stationId, "E5", from, null, 100));
+        cachedStationQueryService.getStationPriceHistory(new NormalizedStationPriceHistoryQuery(stationId, "E5", from, to, 50));
+
+        verify(stationRepository, times(4)).findById(stationId);
+        verify(priceObservationRepository, times(2)).findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                eq(to),
+                any()
+        );
+        verify(priceObservationRepository).findByStationIdAndFuelTypeAndObservedAtBetweenOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(laterFrom),
+                eq(to),
+                any()
+        );
+        verify(priceObservationRepository).findByStationIdAndFuelTypeAndObservedAtGreaterThanEqualOrderByObservedAtDescIdDesc(
+                eq(stationId),
+                eq("E5"),
+                eq(from),
+                any()
+        );
+    }
+
     private static NearbyStationProjection projection() {
         UUID stationId = UUID.randomUUID();
         return new NearbyStationProjection() {
@@ -246,6 +433,23 @@ class CachedStationQueryServiceCachingTest {
                 .currency("GBP")
                 .observedAt(OffsetDateTime.parse("2026-04-18T10:15:30Z"))
                 .reportedUpdatedAt(OffsetDateTime.parse("2026-04-18T10:10:00Z"))
+                .build();
+    }
+
+    private PriceObservationEntity priceObservation(
+            StationEntity station,
+            String fuelType,
+            int pricePence,
+            OffsetDateTime observedAt
+    ) {
+        return PriceObservationEntity.builder()
+                .id(UUID.randomUUID())
+                .station(station)
+                .fuelType(fuelType)
+                .pricePence(pricePence)
+                .currency("GBP")
+                .observedAt(observedAt)
+                .sourceHash(UUID.randomUUID().toString())
                 .build();
     }
 
