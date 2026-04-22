@@ -27,6 +27,7 @@ import uk.co.fuelfinder.api.dto.ApiErrorResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryResponse;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -121,6 +122,57 @@ public class StationQueryController {
                 limit
         );
         request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, response.observations().size());
+        return response;
+    }
+
+    @GetMapping("/{stationId}/price-history/summary")
+    @Operation(
+            summary = "Get station price history summary",
+            description = "Returns daily summarized historical price observations for a single station and fuel type, ordered from newest bucket to oldest."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Station price history summary found successfully.",
+                    content = @Content(schema = @Schema(implementation = StationPriceHistorySummaryResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid station identifier or query parameters.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            ),
+            @ApiResponse(
+                    responseCode = "404",
+                    description = "Station not found.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            )
+    })
+    public StationPriceHistorySummaryResponse getStationPriceHistorySummary(
+            @Parameter(description = "Internal station UUID.", example = "123e4567-e89b-12d3-a456-426614174000")
+            @PathVariable UUID stationId,
+            @Parameter(description = "Fuel type code to filter by.", example = "E5")
+            @NotBlank(message = "fuelType must not be blank")
+            @RequestParam String fuelType,
+            @Parameter(description = "Inclusive lower bound for observedAt in ISO-8601 format.", example = "2026-04-18T00:00:00Z")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            @RequestParam(required = false) OffsetDateTime from,
+            @Parameter(description = "Inclusive upper bound for observedAt in ISO-8601 format.", example = "2026-04-19T00:00:00Z")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+            @RequestParam(required = false) OffsetDateTime to,
+            @Parameter(description = "Maximum number of daily buckets. Defaults to 30, maximum 365.", example = "30")
+            @Positive(message = "limit must be greater than 0")
+            @Max(value = 365, message = "limit must be less than or equal to 365")
+            @RequestParam(required = false) Integer limit,
+            HttpServletRequest request
+    ) {
+        StationPriceHistorySummaryResponse response = stationQueryService.getStationPriceHistorySummary(
+                stationId,
+                fuelType,
+                from,
+                to,
+                limit
+        );
+        request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, response.summaries().size());
         return response;
     }
 

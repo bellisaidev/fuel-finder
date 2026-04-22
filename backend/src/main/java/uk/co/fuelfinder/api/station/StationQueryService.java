@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 
 import java.time.OffsetDateTime;
@@ -18,6 +19,8 @@ public class StationQueryService {
     private static final int MAX_LIMIT = 100;
     private static final int DEFAULT_HISTORY_LIMIT = 100;
     private static final int MAX_HISTORY_LIMIT = 1000;
+    private static final int DEFAULT_HISTORY_SUMMARY_LIMIT = 30;
+    private static final int MAX_HISTORY_SUMMARY_LIMIT = 365;
 
     private final CachedStationQueryService cachedStationQueryService;
 
@@ -63,6 +66,24 @@ public class StationQueryService {
         ));
     }
 
+    public StationPriceHistorySummaryResponse getStationPriceHistorySummary(
+            UUID stationId,
+            String fuelType,
+            OffsetDateTime from,
+            OffsetDateTime to,
+            Integer limit
+    ) {
+        validateHistoryBounds(from, to);
+
+        return cachedStationQueryService.getStationPriceHistorySummary(new NormalizedStationPriceHistorySummaryQuery(
+                stationId,
+                validateAndNormalizeFuelType(fuelType),
+                from,
+                to,
+                normalizeHistorySummaryLimit(limit)
+        ));
+    }
+
     private String validateAndNormalizeFuelType(String fuelType) {
         if (fuelType == null || fuelType.isBlank()) {
             throw new IllegalArgumentException("fuelType must not be blank");
@@ -94,6 +115,20 @@ public class StationQueryService {
 
         if (resolved > MAX_HISTORY_LIMIT) {
             throw new IllegalArgumentException("limit must be less than or equal to 1000");
+        }
+
+        return resolved;
+    }
+
+    private int normalizeHistorySummaryLimit(Integer limit) {
+        int resolved = limit == null ? DEFAULT_HISTORY_SUMMARY_LIMIT : limit;
+
+        if (resolved <= 0) {
+            throw new IllegalArgumentException("limit must be greater than 0");
+        }
+
+        if (resolved > MAX_HISTORY_SUMMARY_LIMIT) {
+            throw new IllegalArgumentException("limit must be less than or equal to 365");
         }
 
         return resolved;

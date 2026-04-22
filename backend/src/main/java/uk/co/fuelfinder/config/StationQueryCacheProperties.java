@@ -9,7 +9,8 @@ public record StationQueryCacheProperties(
         CacheSpec nearby,
         CacheSpec cheapestNearby,
         CacheSpec details,
-        CacheSpec history
+        CacheSpec history,
+        CacheSpec historySummary
 ) {
 
     public record CacheSpec(

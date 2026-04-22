@@ -10,6 +10,8 @@ import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceObservationResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryBucketResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryResponse;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -332,5 +334,73 @@ class StationQueryServiceTest {
                 null,
                 100
         ));
+    }
+
+    @Test
+    void returnsStationPriceHistorySummaryUsingNormalizedInputs() {
+        UUID stationId = UUID.randomUUID();
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+        StationPriceHistorySummaryResponse expected = new StationPriceHistorySummaryResponse(
+                stationId,
+                "E5",
+                from,
+                to,
+                "DAILY",
+                "UTC",
+                List.of(new StationPriceHistorySummaryBucketResponse(
+                        OffsetDateTime.parse("2026-04-18T00:00:00Z"),
+                        OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                        149,
+                        151,
+                        145,
+                        145,
+                        3
+                ))
+        );
+
+        when(cachedStationQueryService.getStationPriceHistorySummary(new NormalizedStationPriceHistorySummaryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        ))).thenReturn(expected);
+
+        StationPriceHistorySummaryResponse response = stationQueryService.getStationPriceHistorySummary(
+                stationId,
+                " e5 ",
+                from,
+                to,
+                null
+        );
+
+        assertEquals(stationId, response.stationId());
+        assertEquals("E5", response.fuelType());
+        assertEquals("DAILY", response.bucket());
+        assertEquals(1, response.summaries().size());
+        verify(cachedStationQueryService).getStationPriceHistorySummary(new NormalizedStationPriceHistorySummaryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        ));
+    }
+
+    @Test
+    void rejectsHistorySummaryLimitAboveMaximum() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.getStationPriceHistorySummary(
+                        UUID.randomUUID(),
+                        "E5",
+                        null,
+                        null,
+                        366
+                )
+        );
+
+        assertEquals("limit must be less than or equal to 365", exception.getMessage());
     }
 }

@@ -21,6 +21,7 @@ import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_ST
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_SUMMARY_CACHE;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -41,6 +42,7 @@ class StationQueryCacheInvalidationIntegrationTest {
         clearCache(CHEAPEST_NEARBY_STATIONS_CACHE);
         clearCache(STATION_DETAILS_CACHE);
         clearCache(STATION_PRICE_HISTORY_CACHE);
+        clearCache(STATION_PRICE_HISTORY_SUMMARY_CACHE);
     }
 
     @Test
@@ -61,12 +63,14 @@ class StationQueryCacheInvalidationIntegrationTest {
     @Test
     void clearsStationPriceHistoryCacheAfterPriceObservationChangeCommit() {
         putValue(STATION_PRICE_HISTORY_CACHE, "k4", "v4");
+        putValue(STATION_PRICE_HISTORY_SUMMARY_CACHE, "k5", "v5");
 
         transactionTemplate.executeWithoutResult(status ->
                 applicationEventPublisher.publishEvent(new PriceObservationsChangedEvent("test"))
         );
 
         assertEquals(null, getValue(STATION_PRICE_HISTORY_CACHE, "k4"));
+        assertEquals(null, getValue(STATION_PRICE_HISTORY_SUMMARY_CACHE, "k5"));
     }
 
     @Test
@@ -86,6 +90,7 @@ class StationQueryCacheInvalidationIntegrationTest {
         putValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2", "v2");
         putValue(STATION_DETAILS_CACHE, "k3", "v3");
         putValue(STATION_PRICE_HISTORY_CACHE, "k4", "v4");
+        putValue(STATION_PRICE_HISTORY_SUMMARY_CACHE, "k5", "v5");
 
         transactionTemplate.executeWithoutResult(status -> {
             applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("test"));
@@ -98,6 +103,7 @@ class StationQueryCacheInvalidationIntegrationTest {
         assertEquals("v2", getValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2"));
         assertEquals("v3", getValue(STATION_DETAILS_CACHE, "k3"));
         assertEquals("v4", getValue(STATION_PRICE_HISTORY_CACHE, "k4"));
+        assertEquals("v5", getValue(STATION_PRICE_HISTORY_SUMMARY_CACHE, "k5"));
     }
 
     @TestConfiguration
