@@ -131,6 +131,7 @@ Currently available read endpoints:
 - `GET /v1/stations/cheapest-nearby`
 - `GET /v1/stations/{stationId}`
 - `GET /v1/stations/{stationId}/price-history`
+- `GET /v1/stations/{stationId}/price-history/summary`
 
 Nearby and cheapest-nearby endpoints accept:
 
@@ -152,6 +153,14 @@ Station price history endpoint accepts:
 - `to` optional ISO-8601 timestamp
 - `limit` optional, default `100`, max `1000`
 
+Station price history summary endpoint accepts:
+
+- `stationId` path variable as UUID
+- `fuelType` required
+- `from` optional ISO-8601 timestamp
+- `to` optional ISO-8601 timestamp
+- `limit` optional, default `30`, max `365`
+
 Example:
 
 ```text
@@ -170,24 +179,33 @@ http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000
 http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000/price-history?fuelType=E5&from=2026-04-18T00:00:00Z&to=2026-04-19T00:00:00Z&limit=100
 ```
 
+```text
+http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000/price-history/summary?fuelType=E5&from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z&limit=30
+```
+
 Behavior:
 
 - `/nearby` sorts primarily by distance, then price
 - `/cheapest-nearby` sorts primarily by price, then distance
 - `/v1/stations/{stationId}` returns a single station with full address, coordinates, and all latest prices by fuel type
 - `/v1/stations/{stationId}/price-history` returns historical observations from `price_observation` for one required `fuelType`
+- `/v1/stations/{stationId}/price-history/summary` returns daily UTC summary buckets for one required `fuelType`
 - valid queries with no matches return `200 OK` with `[]`
 - a valid station detail lookup with no latest prices returns `200 OK` with `latestPrices: []`
 - a valid price-history lookup with no matching observations returns `200 OK` with `observations: []`
-- both endpoints are cached in-memory for repeated equivalent queries
+- a valid price-history-summary lookup with no matching observations returns `200 OK` with `summaries: []`
+- price history summary buckets include `bucketStart`, `bucketEnd`, `firstPricePence`, `highestPricePence`, `lowestPricePence`, `lastPricePence`, and `observationCount`
+- summary buckets are grouped by calendar day in `UTC` and ordered newest bucket first
+- station query endpoints are cached in-memory for repeated equivalent queries
 - cache keys are based on normalized query input: trimmed/uppercased `fuelType` and resolved default `limit`
 - caches are invalidated after transaction commit when the `latest_price` read model changes
-- station price history has its own cache and is invalidated after transaction commit when `price_observation` changes
+- station price history and station price history summary each have their own cache and are invalidated after transaction commit when `price_observation` changes
 - invalid, missing, or non-parseable parameters return HTTP `400` via a global API exception handler
 - successful requests emit a single structured `info` log with path, query parameters, status, duration, and result count
 - invalid requests emit a single structured `warn` log with the same request context plus a synthesized validation error message
 - station detail requests for unknown UUIDs return `404 Not Found` with the standard API error payload
 - station price history returns `404 Not Found` only when the station does not exist
+- station price history summary returns `404 Not Found` only when the station does not exist
 
 ### OpenAPI / Swagger
 
@@ -277,6 +295,12 @@ Station details:
 
 ```text
 http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000
+```
+
+Station price history summary:
+
+```text
+http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000/price-history/summary?fuelType=E5&from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z&limit=30
 ```
 
 ## Configuration Notes

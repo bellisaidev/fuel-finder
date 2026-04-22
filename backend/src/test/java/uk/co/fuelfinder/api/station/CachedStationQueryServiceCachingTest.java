@@ -19,6 +19,7 @@ import uk.co.fuelfinder.persistence.repository.StationQueryRepository;
 import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
 
 import java.time.OffsetDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,6 +36,7 @@ import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_SUMMARY_CACHE;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -350,6 +352,96 @@ class CachedStationQueryServiceCachingTest {
         );
     }
 
+    @Test
+    void reusesCacheEntryForRepeatedStationPriceHistorySummaryLookups() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+        NormalizedStationPriceHistorySummaryQuery query = new NormalizedStationPriceHistorySummaryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        );
+
+        when(stationRepository.findById(stationId)).thenReturn(Optional.of(station));
+        when(priceObservationRepository.findDailySummaryByStationIdAndFuelType(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        )).thenReturn(List.of(summaryBucket(
+                OffsetDateTime.parse("2026-04-18T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                149,
+                151,
+                145,
+                145,
+                3L
+        )));
+
+        cachedStationQueryService.getStationPriceHistorySummary(query);
+        cachedStationQueryService.getStationPriceHistorySummary(query);
+
+        verify(stationRepository, times(1)).findById(stationId);
+        verify(priceObservationRepository, times(1)).findDailySummaryByStationIdAndFuelType(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        );
+    }
+
+    @Test
+    void queriesRepositoryAgainAfterStationPriceHistorySummaryCacheIsCleared() {
+        UUID stationId = UUID.randomUUID();
+        StationEntity station = station(stationId, "SITE-1");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+        NormalizedStationPriceHistorySummaryQuery query = new NormalizedStationPriceHistorySummaryQuery(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        );
+
+        when(stationRepository.findById(stationId)).thenReturn(Optional.of(station));
+        when(priceObservationRepository.findDailySummaryByStationIdAndFuelType(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        )).thenReturn(List.of(summaryBucket(
+                OffsetDateTime.parse("2026-04-18T00:00:00Z"),
+                OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                149,
+                151,
+                145,
+                145,
+                3L
+        )));
+
+        cachedStationQueryService.getStationPriceHistorySummary(query);
+        assertNotNull(cacheManager.getCache(STATION_PRICE_HISTORY_SUMMARY_CACHE));
+        cacheManager.getCache(STATION_PRICE_HISTORY_SUMMARY_CACHE).clear();
+        cachedStationQueryService.getStationPriceHistorySummary(query);
+
+        verify(stationRepository, times(2)).findById(stationId);
+        verify(priceObservationRepository, times(2)).findDailySummaryByStationIdAndFuelType(
+                stationId,
+                "E5",
+                from,
+                to,
+                30
+        );
+    }
+
     private static NearbyStationProjection projection() {
         UUID stationId = UUID.randomUUID();
         return new NearbyStationProjection() {
@@ -451,6 +543,53 @@ class CachedStationQueryServiceCachingTest {
                 .observedAt(observedAt)
                 .sourceHash(UUID.randomUUID().toString())
                 .build();
+    }
+
+    private uk.co.fuelfinder.persistence.repository.projection.StationPriceHistorySummaryBucketProjection summaryBucket(
+            OffsetDateTime bucketStart,
+            OffsetDateTime bucketEnd,
+            int firstPricePence,
+            int highestPricePence,
+            int lowestPricePence,
+            int lastPricePence,
+            long observationCount
+    ) {
+        return new uk.co.fuelfinder.persistence.repository.projection.StationPriceHistorySummaryBucketProjection() {
+            @Override
+            public Instant getBucketStart() {
+                return bucketStart.toInstant();
+            }
+
+            @Override
+            public Instant getBucketEnd() {
+                return bucketEnd.toInstant();
+            }
+
+            @Override
+            public Integer getFirstPricePence() {
+                return firstPricePence;
+            }
+
+            @Override
+            public Integer getHighestPricePence() {
+                return highestPricePence;
+            }
+
+            @Override
+            public Integer getLowestPricePence() {
+                return lowestPricePence;
+            }
+
+            @Override
+            public Integer getLastPricePence() {
+                return lastPricePence;
+            }
+
+            @Override
+            public Long getObservationCount() {
+                return observationCount;
+            }
+        };
     }
 
     private Point point(double longitude, double latitude) {

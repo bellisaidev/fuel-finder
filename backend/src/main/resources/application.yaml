@@ -54,6 +54,9 @@ fuelfinder:
     history:
       ttl: 90s
       max-size: 1000
+    history-summary:
+      ttl: 90s
+      max-size: 1000
   api:
     base-url: https://www.fuel-finder.service.gov.uk/api/v1
     oauth:

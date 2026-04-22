@@ -19,6 +19,8 @@ import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceObservationResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryBucketResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryResponse;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -249,6 +251,76 @@ class StationQueryControllerTest {
                 .andExpect(jsonPath("$.observations").isArray())
                 .andExpect(jsonPath("$.observations").isEmpty())
                 .andExpect(request().attribute(ApiRequestLogAttributes.RESULT_COUNT, 0));
+    }
+
+    @Test
+    void returnsStationPriceHistorySummaryForValidRequest(CapturedOutput output) throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        OffsetDateTime from = OffsetDateTime.parse("2026-04-18T00:00:00Z");
+        OffsetDateTime to = OffsetDateTime.parse("2026-04-19T00:00:00Z");
+
+        when(stationQueryService.getStationPriceHistorySummary(stationId, "E5", from, to, 30))
+                .thenReturn(new StationPriceHistorySummaryResponse(
+                        stationId,
+                        "E5",
+                        from,
+                        to,
+                        "DAILY",
+                        "UTC",
+                        List.of(new StationPriceHistorySummaryBucketResponse(
+                                OffsetDateTime.parse("2026-04-18T00:00:00Z"),
+                                OffsetDateTime.parse("2026-04-19T00:00:00Z"),
+                                149,
+                                151,
+                                145,
+                                145,
+                                3
+                        ))
+                ));
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history/summary", stationId)
+                        .param("fuelType", "E5")
+                        .param("from", "2026-04-18T00:00:00Z")
+                        .param("to", "2026-04-19T00:00:00Z")
+                        .param("limit", "30"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.stationId").value(stationId.toString()))
+                .andExpect(jsonPath("$.bucket").value("DAILY"))
+                .andExpect(jsonPath("$.timezone").value("UTC"))
+                .andExpect(jsonPath("$.summaries[0].firstPricePence").value(149))
+                .andExpect(jsonPath("$.summaries[0].lastPricePence").value(145))
+                .andExpect(request().attribute(ApiRequestLogAttributes.RESULT_COUNT, 1));
+
+        assertLogContains(output, "event=station_query_completed");
+        assertLogContains(output, "path=/v1/stations/" + stationId + "/price-history/summary");
+        assertLogContains(output, "status=200");
+        assertLogContains(output, "resultCount=1");
+    }
+
+    @Test
+    void returnsBadRequestForInvalidHistorySummaryLimit() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history/summary", stationId)
+                        .param("fuelType", "E5")
+                        .param("limit", "366"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("limit must be less than or equal to 365"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsNotFoundForUnknownStationPriceHistorySummary() throws Exception {
+        UUID stationId = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+        when(stationQueryService.getStationPriceHistorySummary(stationId, "E5", null, null, null))
+                .thenThrow(new StationNotFoundException(stationId));
+
+        mockMvc.perform(get("/v1/stations/{stationId}/price-history/summary", stationId)
+                        .param("fuelType", "E5"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Station not found: " + stationId));
     }
 
     @Test

@@ -8,6 +8,8 @@ import uk.co.fuelfinder.api.StationNotFoundException;
 import uk.co.fuelfinder.api.station.dto.LatestStationPriceResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryBucketResponse;
+import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceObservationResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.persistence.entity.LatestPriceEntity;
@@ -18,15 +20,18 @@ import uk.co.fuelfinder.persistence.repository.PriceObservationRepository;
 import uk.co.fuelfinder.persistence.repository.StationRepository;
 import uk.co.fuelfinder.persistence.repository.StationQueryRepository;
 import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
+import uk.co.fuelfinder.persistence.repository.projection.StationPriceHistorySummaryBucketProjection;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.time.ZoneOffset;
 
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_SUMMARY_CACHE;
 
 @Service
 @RequiredArgsConstructor
@@ -144,6 +149,34 @@ public class CachedStationQueryService {
         );
     }
 
+    @Cacheable(cacheNames = STATION_PRICE_HISTORY_SUMMARY_CACHE)
+    public StationPriceHistorySummaryResponse getStationPriceHistorySummary(NormalizedStationPriceHistorySummaryQuery query) {
+        stationRepository.findById(query.stationId())
+                .orElseThrow(() -> new StationNotFoundException(query.stationId()));
+
+        List<StationPriceHistorySummaryBucketResponse> summaries = priceObservationRepository
+                .findDailySummaryByStationIdAndFuelType(
+                        query.stationId(),
+                        query.fuelType(),
+                        query.from(),
+                        query.to(),
+                        query.limit()
+                )
+                .stream()
+                .map(this::toStationPriceHistorySummaryBucketResponse)
+                .toList();
+
+        return new StationPriceHistorySummaryResponse(
+                query.stationId(),
+                query.fuelType(),
+                query.from(),
+                query.to(),
+                "DAILY",
+                "UTC",
+                summaries
+        );
+    }
+
     private NearbyStationResponse toResponse(NearbyStationProjection projection) {
         return new NearbyStationResponse(
                 projection.getStationId(),
@@ -173,6 +206,20 @@ public class CachedStationQueryService {
         return new StationPriceObservationResponse(
                 priceObservation.getPricePence(),
                 priceObservation.getObservedAt()
+        );
+    }
+
+    private StationPriceHistorySummaryBucketResponse toStationPriceHistorySummaryBucketResponse(
+            StationPriceHistorySummaryBucketProjection projection
+    ) {
+        return new StationPriceHistorySummaryBucketResponse(
+                projection.getBucketStart().atOffset(ZoneOffset.UTC),
+                projection.getBucketEnd().atOffset(ZoneOffset.UTC),
+                projection.getFirstPricePence(),
+                projection.getHighestPricePence(),
+                projection.getLowestPricePence(),
+                projection.getLastPricePence(),
+                projection.getObservationCount()
         );
     }
 }

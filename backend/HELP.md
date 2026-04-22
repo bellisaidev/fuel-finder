@@ -35,6 +35,7 @@ Available station endpoints:
 - `GET /v1/stations/cheapest-nearby`
 - `GET /v1/stations/{stationId}`
 - `GET /v1/stations/{stationId}/price-history`
+- `GET /v1/stations/{stationId}/price-history/summary`
 
 Station query caching uses local Caffeine caches for:
 
@@ -42,6 +43,7 @@ Station query caching uses local Caffeine caches for:
 - `cheapestNearbyStations`
 - `stationDetails`
 - `stationPriceHistory`
+- `stationPriceHistorySummary`
 
 Nearby and cheapest-nearby endpoints accept:
 
@@ -62,6 +64,14 @@ Station price history endpoint accepts:
 - `from` optional ISO-8601 timestamp
 - `to` optional ISO-8601 timestamp
 - `limit` optional, default `100`, max `1000`
+
+Station price history summary endpoint accepts:
+
+- `stationId` as UUID path variable
+- `fuelType` required
+- `from` optional ISO-8601 timestamp
+- `to` optional ISO-8601 timestamp
+- `limit` optional, default `30`, max `365`
 
 ## Station Location Fields
 

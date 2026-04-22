@@ -11,6 +11,7 @@ import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_ST
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_SUMMARY_CACHE;
 
 @Component
 @RequiredArgsConstructor
@@ -28,6 +29,7 @@ public class StationQueryCacheInvalidationListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onPriceObservationsChanged(PriceObservationsChangedEvent ignored) {
         clearCache(STATION_PRICE_HISTORY_CACHE);
+        clearCache(STATION_PRICE_HISTORY_SUMMARY_CACHE);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
