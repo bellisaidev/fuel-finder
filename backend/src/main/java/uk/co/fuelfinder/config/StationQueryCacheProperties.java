@@ -8,6 +8,7 @@ import java.time.Duration;
 public record StationQueryCacheProperties(
         CacheSpec nearby,
         CacheSpec cheapestNearby,
+        CacheSpec inBounds,
         CacheSpec details,
         CacheSpec history,
         CacheSpec historySummary

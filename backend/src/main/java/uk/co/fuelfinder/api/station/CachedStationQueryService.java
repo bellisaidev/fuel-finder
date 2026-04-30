@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import uk.co.fuelfinder.api.StationNotFoundException;
 import uk.co.fuelfinder.api.station.dto.LatestStationPriceResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
+import uk.co.fuelfinder.api.station.dto.StationMapMarkerResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryBucketResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryResponse;
@@ -20,6 +21,7 @@ import uk.co.fuelfinder.persistence.repository.PriceObservationRepository;
 import uk.co.fuelfinder.persistence.repository.StationRepository;
 import uk.co.fuelfinder.persistence.repository.StationQueryRepository;
 import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
+import uk.co.fuelfinder.persistence.repository.projection.StationMapMarkerProjection;
 import uk.co.fuelfinder.persistence.repository.projection.StationPriceHistorySummaryBucketProjection;
 
 import java.util.Comparator;
@@ -28,6 +30,7 @@ import java.util.UUID;
 import java.time.ZoneOffset;
 
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_STATIONS_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.IN_BOUNDS_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
@@ -67,6 +70,21 @@ public class CachedStationQueryService {
                 )
                 .stream()
                 .map(this::toResponse)
+                .toList();
+    }
+
+    @Cacheable(cacheNames = IN_BOUNDS_STATIONS_CACHE)
+    public List<StationMapMarkerResponse> findStationsInBounds(NormalizedStationBoundsQuery query) {
+        return stationQueryRepository.findStationsInBounds(
+                        query.west(),
+                        query.south(),
+                        query.east(),
+                        query.north(),
+                        query.fuelType(),
+                        query.limit()
+                )
+                .stream()
+                .map(this::toMapMarkerResponse)
                 .toList();
     }
 
@@ -190,6 +208,19 @@ public class CachedStationQueryService {
                 projection.getFuelType(),
                 projection.getPricePence(),
                 projection.getDistanceMeters() == null ? 0d : projection.getDistanceMeters()
+        );
+    }
+
+    private StationMapMarkerResponse toMapMarkerResponse(StationMapMarkerProjection projection) {
+        return new StationMapMarkerResponse(
+                projection.getStationId(),
+                projection.getSiteId(),
+                projection.getBrand(),
+                projection.getPostcode(),
+                projection.getLatitude() == null ? 0d : projection.getLatitude(),
+                projection.getLongitude() == null ? 0d : projection.getLongitude(),
+                projection.getFuelType(),
+                projection.getPricePence()
         );
     }
 

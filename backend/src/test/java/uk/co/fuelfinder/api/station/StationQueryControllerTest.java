@@ -17,6 +17,7 @@ import uk.co.fuelfinder.api.station.dto.LatestStationPriceResponse;
 import uk.co.fuelfinder.config.StationQueryApiLoggingConfig;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
+import uk.co.fuelfinder.api.station.dto.StationMapMarkerResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceObservationResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryBucketResponse;
@@ -321,6 +322,137 @@ class StationQueryControllerTest {
                         .param("fuelType", "E5"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Station not found: " + stationId));
+    }
+
+    @Test
+    void returnsStationMapMarkersForValidInBoundsRequest(CapturedOutput output) throws Exception {
+        UUID stationId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        when(stationQueryService.findStationsInBounds("-0.20,51.45,-0.05,51.55", "E5", 250))
+                .thenReturn(List.of(new StationMapMarkerResponse(
+                        stationId,
+                        "SITE-1",
+                        "Shell",
+                        "NW1 6XE",
+                        51.5237,
+                        -0.1585,
+                        "E5",
+                        145
+                )));
+
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.20,51.45,-0.05,51.55")
+                        .param("fuelType", "E5")
+                        .param("limit", "250"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$[0].stationId").value(stationId.toString()))
+                .andExpect(jsonPath("$[0].siteId").value("SITE-1"))
+                .andExpect(jsonPath("$[0].postcode").value("NW1 6XE"))
+                .andExpect(jsonPath("$[0].latitude").value(51.5237))
+                .andExpect(jsonPath("$[0].longitude").value(-0.1585))
+                .andExpect(jsonPath("$[0].fuelType").value("E5"))
+                .andExpect(jsonPath("$[0].pricePence").value(145))
+                .andExpect(request().attribute(ApiRequestLogAttributes.RESULT_COUNT, 1));
+
+        assertLogContains(output, "event=station_query_completed");
+        assertLogContains(output, "path=/v1/stations/in-bounds");
+        assertLogContains(output, "status=200");
+        assertLogContains(output, "resultCount=1");
+    }
+
+    @Test
+    void usesDefaultInBoundsLimitWhenLimitIsOmitted() throws Exception {
+        when(stationQueryService.findStationsInBounds("-0.20,51.45,-0.05,51.55", "E5", null))
+                .thenReturn(List.of());
+
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.20,51.45,-0.05,51.55")
+                        .param("fuelType", "E5"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("[]"));
+
+        verify(stationQueryService).findStationsInBounds("-0.20,51.45,-0.05,51.55", "E5", null);
+    }
+
+    @Test
+    void returnsBadRequestForMissingInBoundsFuelType() throws Exception {
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.20,51.45,-0.05,51.55"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("fuelType is required"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsBadRequestForBlankInBoundsFuelType() throws Exception {
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.20,51.45,-0.05,51.55")
+                        .param("fuelType", "   "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("fuelType must not be blank"));
+
+        verifyNoInteractions(stationQueryService);
+    }
+
+    @Test
+    void returnsBadRequestForMalformedInBoundsBbox() throws Exception {
+        when(stationQueryService.findStationsInBounds("-0.20,51.45,-0.05", "E5", null))
+                .thenThrow(new IllegalArgumentException("bbox must contain west,south,east,north"));
+
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.20,51.45,-0.05")
+                        .param("fuelType", "E5"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("bbox must contain west,south,east,north"));
+    }
+
+    @Test
+    void returnsBadRequestForNonNumericInBoundsBbox() throws Exception {
+        when(stationQueryService.findStationsInBounds("-0.20,north,-0.05,51.55", "E5", null))
+                .thenThrow(new IllegalArgumentException("bbox must contain numeric values"));
+
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.20,north,-0.05,51.55")
+                        .param("fuelType", "E5"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("bbox must contain numeric values"));
+    }
+
+    @Test
+    void returnsBadRequestForOutOfRangeInBoundsBbox() throws Exception {
+        when(stationQueryService.findStationsInBounds("-181,51.45,-0.05,51.55", "E5", null))
+                .thenThrow(new IllegalArgumentException("bbox west must be between -180 and 180"));
+
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-181,51.45,-0.05,51.55")
+                        .param("fuelType", "E5"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("bbox west must be between -180 and 180"));
+    }
+
+    @Test
+    void returnsBadRequestForInvertedInBoundsBbox() throws Exception {
+        when(stationQueryService.findStationsInBounds("-0.05,51.45,-0.20,51.55", "E5", null))
+                .thenThrow(new IllegalArgumentException("bbox west must be less than east"));
+
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.05,51.45,-0.20,51.55")
+                        .param("fuelType", "E5"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("bbox west must be less than east"));
+    }
+
+    @Test
+    void returnsBadRequestForInvalidInBoundsLimit() throws Exception {
+        mockMvc.perform(get("/v1/stations/in-bounds")
+                        .param("bbox", "-0.20,51.45,-0.05,51.55")
+                        .param("fuelType", "E5")
+                        .param("limit", "501"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("limit must be less than or equal to 500"));
+
+        verifyNoInteractions(stationQueryService);
     }
 
     @Test
