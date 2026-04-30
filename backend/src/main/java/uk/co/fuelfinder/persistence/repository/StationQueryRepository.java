@@ -5,6 +5,7 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 import uk.co.fuelfinder.persistence.entity.StationEntity;
 import uk.co.fuelfinder.persistence.repository.projection.NearbyStationProjection;
+import uk.co.fuelfinder.persistence.repository.projection.StationMapMarkerProjection;
 
 import java.util.List;
 import java.util.UUID;
@@ -83,6 +84,38 @@ public interface StationQueryRepository extends Repository<StationEntity, UUID> 
             @Param("lat") double lat,
             @Param("lon") double lon,
             @Param("radiusMeters") double radiusMeters,
+            @Param("fuelType") String fuelType,
+            @Param("limit") int limit
+    );
+
+    @Query(value = """
+            SELECT
+                s.id AS stationId,
+                s.site_id AS siteId,
+                s.brand AS brand,
+                s.postcode AS postcode,
+                ST_Y(s.location::geometry) AS latitude,
+                ST_X(s.location::geometry) AS longitude,
+                lp.fuel_type AS fuelType,
+                lp.price_pence AS pricePence
+            FROM station s
+            JOIN latest_price lp
+              ON lp.station_id = s.id
+            WHERE s.is_active = true
+              AND s.location IS NOT NULL
+              AND lp.fuel_type = :fuelType
+              AND ST_Covers(
+                    ST_MakeEnvelope(:west, :south, :east, :north, 4326),
+                    s.location::geometry
+              )
+            ORDER BY s.id ASC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<StationMapMarkerProjection> findStationsInBounds(
+            @Param("west") double west,
+            @Param("south") double south,
+            @Param("east") double east,
+            @Param("north") double north,
             @Param("fuelType") String fuelType,
             @Param("limit") int limit
     );

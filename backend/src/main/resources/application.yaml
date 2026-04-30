@@ -48,6 +48,9 @@ fuelfinder:
     cheapest-nearby:
       ttl: 60s
       max-size: 500
+    in-bounds:
+      ttl: 60s
+      max-size: 500
     details:
       ttl: 90s
       max-size: 1000

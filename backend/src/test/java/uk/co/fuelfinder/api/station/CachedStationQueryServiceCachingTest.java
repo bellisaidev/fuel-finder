@@ -34,6 +34,7 @@ import static org.mockito.Mockito.when;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.IN_BOUNDS_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_SUMMARY_CACHE;
@@ -109,6 +110,64 @@ class CachedStationQueryServiceCachingTest {
 
         verify(stationQueryRepository).findNearbyStations(51.5074, -0.1278, 2000L, "E5", 10);
         verify(stationQueryRepository).findNearbyStations(51.5075, -0.1278, 2000L, "E5", 10);
+    }
+
+    @Test
+    void reusesCacheEntryForRepeatedInBoundsQueries() {
+        when(stationQueryRepository.findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 250))
+                .thenReturn(List.of(mapMarkerProjection()));
+
+        NormalizedStationBoundsQuery query = new NormalizedStationBoundsQuery(
+                -0.20,
+                51.45,
+                -0.05,
+                51.55,
+                "E5",
+                250
+        );
+
+        cachedStationQueryService.findStationsInBounds(query);
+        cachedStationQueryService.findStationsInBounds(query);
+
+        verify(stationQueryRepository, times(1))
+                .findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 250);
+    }
+
+    @Test
+    void usesDifferentCacheEntriesForDifferentInBoundsQueries() {
+        when(stationQueryRepository.findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 250))
+                .thenReturn(List.of(mapMarkerProjection()));
+        when(stationQueryRepository.findStationsInBounds(-0.21, 51.45, -0.05, 51.55, "E5", 250))
+                .thenReturn(List.of(mapMarkerProjection()));
+        when(stationQueryRepository.findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "B7", 250))
+                .thenReturn(List.of(mapMarkerProjection()));
+        when(stationQueryRepository.findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 100))
+                .thenReturn(List.of(mapMarkerProjection()));
+
+        cachedStationQueryService.findStationsInBounds(new NormalizedStationBoundsQuery(-0.20, 51.45, -0.05, 51.55, "E5", 250));
+        cachedStationQueryService.findStationsInBounds(new NormalizedStationBoundsQuery(-0.21, 51.45, -0.05, 51.55, "E5", 250));
+        cachedStationQueryService.findStationsInBounds(new NormalizedStationBoundsQuery(-0.20, 51.45, -0.05, 51.55, "B7", 250));
+        cachedStationQueryService.findStationsInBounds(new NormalizedStationBoundsQuery(-0.20, 51.45, -0.05, 51.55, "E5", 100));
+
+        verify(stationQueryRepository).findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 250);
+        verify(stationQueryRepository).findStationsInBounds(-0.21, 51.45, -0.05, 51.55, "E5", 250);
+        verify(stationQueryRepository).findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "B7", 250);
+        verify(stationQueryRepository).findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 100);
+    }
+
+    @Test
+    void queriesRepositoryAgainAfterInBoundsCacheIsCleared() {
+        when(stationQueryRepository.findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 250))
+                .thenReturn(List.of(mapMarkerProjection()));
+        NormalizedStationBoundsQuery query = new NormalizedStationBoundsQuery(-0.20, 51.45, -0.05, 51.55, "E5", 250);
+
+        cachedStationQueryService.findStationsInBounds(query);
+        assertNotNull(cacheManager.getCache(IN_BOUNDS_STATIONS_CACHE));
+        cacheManager.getCache(IN_BOUNDS_STATIONS_CACHE).clear();
+        cachedStationQueryService.findStationsInBounds(query);
+
+        verify(stationQueryRepository, times(2))
+                .findStationsInBounds(-0.20, 51.45, -0.05, 51.55, "E5", 250);
     }
 
     @Test
@@ -498,6 +557,51 @@ class CachedStationQueryServiceCachingTest {
             @Override
             public Double getDistanceMeters() {
                 return 321.5;
+            }
+        };
+    }
+
+    private static uk.co.fuelfinder.persistence.repository.projection.StationMapMarkerProjection mapMarkerProjection() {
+        UUID stationId = UUID.randomUUID();
+        return new uk.co.fuelfinder.persistence.repository.projection.StationMapMarkerProjection() {
+            @Override
+            public UUID getStationId() {
+                return stationId;
+            }
+
+            @Override
+            public String getSiteId() {
+                return "site-1";
+            }
+
+            @Override
+            public String getBrand() {
+                return "Shell";
+            }
+
+            @Override
+            public String getPostcode() {
+                return "NW1 6XE";
+            }
+
+            @Override
+            public Double getLatitude() {
+                return 51.5237;
+            }
+
+            @Override
+            public Double getLongitude() {
+                return -0.1585;
+            }
+
+            @Override
+            public String getFuelType() {
+                return "E5";
+            }
+
+            @Override
+            public Integer getPricePence() {
+                return 145;
             }
         };
     }

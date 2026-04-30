@@ -18,6 +18,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_STATIONS_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.IN_BOUNDS_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
@@ -40,6 +41,7 @@ class StationQueryCacheInvalidationIntegrationTest {
     void resetCaches() {
         clearCache(NEARBY_STATIONS_CACHE);
         clearCache(CHEAPEST_NEARBY_STATIONS_CACHE);
+        clearCache(IN_BOUNDS_STATIONS_CACHE);
         clearCache(STATION_DETAILS_CACHE);
         clearCache(STATION_PRICE_HISTORY_CACHE);
         clearCache(STATION_PRICE_HISTORY_SUMMARY_CACHE);
@@ -49,6 +51,7 @@ class StationQueryCacheInvalidationIntegrationTest {
     void clearsCachesAfterCommit() {
         putValue(NEARBY_STATIONS_CACHE, "k1", "v1");
         putValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2", "v2");
+        putValue(IN_BOUNDS_STATIONS_CACHE, "k6", "v6");
         putValue(STATION_DETAILS_CACHE, "k3", "v3");
 
         transactionTemplate.executeWithoutResult(status ->
@@ -57,6 +60,7 @@ class StationQueryCacheInvalidationIntegrationTest {
 
         assertEquals(null, getValue(NEARBY_STATIONS_CACHE, "k1"));
         assertEquals(null, getValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2"));
+        assertEquals(null, getValue(IN_BOUNDS_STATIONS_CACHE, "k6"));
         assertEquals(null, getValue(STATION_DETAILS_CACHE, "k3"));
     }
 
@@ -76,18 +80,21 @@ class StationQueryCacheInvalidationIntegrationTest {
     @Test
     void clearsStationDetailsCacheAfterStationChangeCommit() {
         putValue(STATION_DETAILS_CACHE, "k3", "v3");
+        putValue(IN_BOUNDS_STATIONS_CACHE, "k6", "v6");
 
         transactionTemplate.executeWithoutResult(status ->
                 applicationEventPublisher.publishEvent(new StationsChangedEvent("test"))
         );
 
         assertEquals(null, getValue(STATION_DETAILS_CACHE, "k3"));
+        assertEquals(null, getValue(IN_BOUNDS_STATIONS_CACHE, "k6"));
     }
 
     @Test
     void doesNotClearCachesWhenTransactionRollsBack() {
         putValue(NEARBY_STATIONS_CACHE, "k1", "v1");
         putValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2", "v2");
+        putValue(IN_BOUNDS_STATIONS_CACHE, "k6", "v6");
         putValue(STATION_DETAILS_CACHE, "k3", "v3");
         putValue(STATION_PRICE_HISTORY_CACHE, "k4", "v4");
         putValue(STATION_PRICE_HISTORY_SUMMARY_CACHE, "k5", "v5");
@@ -101,6 +108,7 @@ class StationQueryCacheInvalidationIntegrationTest {
 
         assertEquals("v1", getValue(NEARBY_STATIONS_CACHE, "k1"));
         assertEquals("v2", getValue(CHEAPEST_NEARBY_STATIONS_CACHE, "k2"));
+        assertEquals("v6", getValue(IN_BOUNDS_STATIONS_CACHE, "k6"));
         assertEquals("v3", getValue(STATION_DETAILS_CACHE, "k3"));
         assertEquals("v4", getValue(STATION_PRICE_HISTORY_CACHE, "k4"));
         assertEquals("v5", getValue(STATION_PRICE_HISTORY_SUMMARY_CACHE, "k5"));

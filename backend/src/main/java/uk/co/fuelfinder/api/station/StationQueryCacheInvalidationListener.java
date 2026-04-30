@@ -8,6 +8,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.CHEAPEST_NEARBY_STATIONS_CACHE;
+import static uk.co.fuelfinder.config.StationQueryCacheConfig.IN_BOUNDS_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.NEARBY_STATIONS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_DETAILS_CACHE;
 import static uk.co.fuelfinder.config.StationQueryCacheConfig.STATION_PRICE_HISTORY_CACHE;
@@ -23,6 +24,7 @@ public class StationQueryCacheInvalidationListener {
     public void onLatestPricesChanged(LatestPricesChangedEvent ignored) {
         clearCache(NEARBY_STATIONS_CACHE);
         clearCache(CHEAPEST_NEARBY_STATIONS_CACHE);
+        clearCache(IN_BOUNDS_STATIONS_CACHE);
         clearCache(STATION_DETAILS_CACHE);
     }
 
@@ -35,6 +37,7 @@ public class StationQueryCacheInvalidationListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onStationsChanged(StationsChangedEvent ignored) {
         clearCache(STATION_DETAILS_CACHE);
+        clearCache(IN_BOUNDS_STATIONS_CACHE);
     }
 
     private void clearCache(String cacheName) {

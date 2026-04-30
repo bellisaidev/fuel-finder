@@ -26,6 +26,7 @@ import uk.co.fuelfinder.api.ApiRequestLogAttributes;
 import uk.co.fuelfinder.api.dto.ApiErrorResponse;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
+import uk.co.fuelfinder.api.station.dto.StationMapMarkerResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryResponse;
 
@@ -41,6 +42,45 @@ import java.util.UUID;
 public class StationQueryController {
 
     private final StationQueryService stationQueryService;
+
+    @GetMapping("/in-bounds")
+    @Operation(
+            summary = "Find stations in map viewport",
+            description = "Returns active station markers inside the requested bounding box for the requested fuel type. The bbox format is west,south,east,north."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Stations in bounds found successfully.",
+                    content = @Content(array = @ArraySchema(schema = @Schema(implementation = StationMapMarkerResponse.class)))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid query parameters.",
+                    content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+            )
+    })
+    public List<StationMapMarkerResponse> getStationsInBounds(
+            @Parameter(description = "Bounding box as west,south,east,north.", example = "-0.20,51.45,-0.05,51.55")
+            @NotBlank(message = "bbox must not be blank")
+            @RequestParam String bbox,
+            @Parameter(description = "Fuel type code to filter by.", example = "E5")
+            @NotBlank(message = "fuelType must not be blank")
+            @RequestParam String fuelType,
+            @Parameter(description = "Maximum number of results. Defaults to 250, maximum 500.", example = "250")
+            @Positive(message = "limit must be greater than 0")
+            @Max(value = 500, message = "limit must be less than or equal to 500")
+            @RequestParam(required = false) Integer limit,
+            HttpServletRequest request
+    ) {
+        List<StationMapMarkerResponse> response = stationQueryService.findStationsInBounds(
+                bbox,
+                fuelType,
+                limit
+        );
+        request.setAttribute(ApiRequestLogAttributes.RESULT_COUNT, response.size());
+        return response;
+    }
 
     @GetMapping("/{stationId}")
     @Operation(

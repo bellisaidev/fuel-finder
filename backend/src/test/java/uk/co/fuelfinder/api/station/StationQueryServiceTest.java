@@ -8,6 +8,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import uk.co.fuelfinder.api.StationNotFoundException;
 import uk.co.fuelfinder.api.station.dto.StationDetailsResponse;
 import uk.co.fuelfinder.api.station.dto.NearbyStationResponse;
+import uk.co.fuelfinder.api.station.dto.StationMapMarkerResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistoryResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceObservationResponse;
 import uk.co.fuelfinder.api.station.dto.StationPriceHistorySummaryBucketResponse;
@@ -140,6 +141,119 @@ class StationQueryServiceTest {
         verify(cachedStationQueryService).findNearbyStations(
                 new NormalizedStationQuery(51.5074001, -0.1278001, 2000.4, "E5", 10)
         );
+    }
+
+    @Test
+    void returnsStationsInBoundsUsingParsedBboxAndNormalizedInputs() {
+        UUID stationId = UUID.randomUUID();
+        StationMapMarkerResponse expected = new StationMapMarkerResponse(
+                stationId,
+                "SITE-1",
+                "Shell",
+                "NW1 6XE",
+                51.5237,
+                -0.1585,
+                "E5",
+                145
+        );
+
+        when(cachedStationQueryService.findStationsInBounds(argThat(query ->
+                query.west() == -0.20
+                        && query.south() == 51.45
+                        && query.east() == -0.05
+                        && query.north() == 51.55
+                        && query.fuelType().equals("E5")
+                        && query.limit() == 250
+        ))).thenReturn(List.of(expected));
+
+        List<StationMapMarkerResponse> response = stationQueryService.findStationsInBounds(
+                " -0.20, 51.45, -0.05, 51.55 ",
+                " e5 ",
+                null
+        );
+
+        assertEquals(1, response.size());
+        assertEquals(stationId, response.getFirst().stationId());
+        assertEquals(51.5237, response.getFirst().latitude());
+        assertEquals(-0.1585, response.getFirst().longitude());
+        assertEquals("E5", response.getFirst().fuelType());
+
+        verify(cachedStationQueryService).findStationsInBounds(
+                new NormalizedStationBoundsQuery(-0.20, 51.45, -0.05, 51.55, "E5", 250)
+        );
+    }
+
+    @Test
+    void preservesExplicitInBoundsLimit() {
+        when(cachedStationQueryService.findStationsInBounds(argThat(query ->
+                query.limit() == 500
+        ))).thenReturn(List.of());
+
+        stationQueryService.findStationsInBounds("-0.20,51.45,-0.05,51.55", "E5", 500);
+
+        verify(cachedStationQueryService).findStationsInBounds(
+                new NormalizedStationBoundsQuery(-0.20, 51.45, -0.05, 51.55, "E5", 500)
+        );
+    }
+
+    @Test
+    void rejectsMalformedInBoundsBbox() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.findStationsInBounds("-0.20,51.45,-0.05", "E5", null)
+        );
+
+        assertEquals("bbox must contain west,south,east,north", exception.getMessage());
+    }
+
+    @Test
+    void rejectsNonNumericInBoundsBbox() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.findStationsInBounds("-0.20,north,-0.05,51.55", "E5", null)
+        );
+
+        assertEquals("bbox must contain numeric values", exception.getMessage());
+    }
+
+    @Test
+    void rejectsOutOfRangeInBoundsBbox() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.findStationsInBounds("-181,51.45,-0.05,51.55", "E5", null)
+        );
+
+        assertEquals("bbox west must be between -180 and 180", exception.getMessage());
+    }
+
+    @Test
+    void rejectsInvertedInBoundsLongitudeRange() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.findStationsInBounds("-0.05,51.45,-0.20,51.55", "E5", null)
+        );
+
+        assertEquals("bbox west must be less than east", exception.getMessage());
+    }
+
+    @Test
+    void rejectsInvertedInBoundsLatitudeRange() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.findStationsInBounds("-0.20,51.55,-0.05,51.45", "E5", null)
+        );
+
+        assertEquals("bbox south must be less than north", exception.getMessage());
+    }
+
+    @Test
+    void rejectsInBoundsLimitAboveMaximum() {
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
+                () -> stationQueryService.findStationsInBounds("-0.20,51.45,-0.05,51.55", "E5", 501)
+        );
+
+        assertEquals("limit must be less than or equal to 500", exception.getMessage());
     }
 
     @Test

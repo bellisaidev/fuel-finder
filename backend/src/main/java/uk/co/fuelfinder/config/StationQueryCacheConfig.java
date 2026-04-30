@@ -14,6 +14,7 @@ public class StationQueryCacheConfig {
 
     public static final String NEARBY_STATIONS_CACHE = "nearbyStations";
     public static final String CHEAPEST_NEARBY_STATIONS_CACHE = "cheapestNearbyStations";
+    public static final String IN_BOUNDS_STATIONS_CACHE = "inBoundsStations";
     public static final String STATION_DETAILS_CACHE = "stationDetails";
     public static final String STATION_PRICE_HISTORY_CACHE = "stationPriceHistory";
     public static final String STATION_PRICE_HISTORY_SUMMARY_CACHE = "stationPriceHistorySummary";
@@ -24,6 +25,7 @@ public class StationQueryCacheConfig {
         cacheManager.setCaches(List.of(
                 buildCache(NEARBY_STATIONS_CACHE, properties.nearby()),
                 buildCache(CHEAPEST_NEARBY_STATIONS_CACHE, properties.cheapestNearby()),
+                buildCache(IN_BOUNDS_STATIONS_CACHE, properties.inBounds()),
                 buildCache(STATION_DETAILS_CACHE, properties.details()),
                 buildCache(STATION_PRICE_HISTORY_CACHE, properties.history()),
                 buildCache(STATION_PRICE_HISTORY_SUMMARY_CACHE, properties.historySummary())
