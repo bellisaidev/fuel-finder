@@ -30,10 +30,47 @@ management:
     web:
       exposure:
         include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
 
 fuelfinder:
+  cache:
+    nearby:
+      ttl: 60s
+      max-size: 500
+    cheapest-nearby:
+      ttl: 60s
+      max-size: 500
+    in-bounds:
+      ttl: 60s
+      max-size: 500
+    details:
+      ttl: 90s
+      max-size: 1000
+    history:
+      ttl: 90s
+      max-size: 1000
+    history-summary:
+      ttl: 90s
+      max-size: 1000
   api:
     base-url: https://www.fuel-finder.service.gov.uk/api/v1
     oauth:
       token-path: /oauth/generate_access_token
       refresh-path: /oauth/regenerate_access_token
+  ingestion:
+    reconciliation:
+      unexplained-mismatch-action: fail
+    scheduler:
+      enabled: false
+      cron: "0 */30 * * * *"
+      retailer-name: "FUEL_FINDER_API"

@@ -15,8 +15,9 @@ What is implemented today:
 - Paginated retrieval of PFS and fuel price feeds
 - Raw feed persistence for auditability
 - Station normalization and upsert flow
+- Ingestion reconciliation checks for raw, normalized, skipped, duplicate, and persisted counts
 - Fuel price normalization, deduplicated observation ingestion, and latest price projection/backfill
-- Geospatial read APIs for nearby stations and cheapest nearby stations
+- Geospatial read APIs for nearby stations, cheapest nearby stations, map bounds, station details, and price history
 - Local Caffeine caching for repeated geospatial read queries with transaction-safe invalidation after latest-price updates
 - Global API error handling for invalid query parameters
 - Lightweight operational logging for public station queries with success timing/result counts and consistent `400` warnings
@@ -27,7 +28,7 @@ What is implemented today:
 
 What is still in progress:
 
-- Station price history and richer read APIs
+- Additional read filters and query shapes beyond the current station endpoints
 - Broader integration coverage across more failure scenarios and ingestion edge cases
 - Cleanup or consolidation of alternative JDBC write paths that are not part of the active ingestion flow
 
@@ -60,7 +61,7 @@ Main areas:
 - `ingestion/raw/orchestrator/`: ingestion coordination
 - `ingestion/raw/writer/`: raw payload storage plus experimental/alternative JDBC write helpers
 - `ingestion/normalize/`: station normalization, price normalization, observation ingestion, and latest price projection
-- `api/station/`: station read endpoints for nearby and cheapest-nearby lookups
+- `api/station/`: station read endpoints for nearby, cheapest-nearby, map bounds, details, and price history lookups
 - `persistence/entity/`: JPA entities
 - `persistence/repository/`: Spring Data repositories
 
@@ -88,6 +89,8 @@ flowchart TD
     O --> P
     H -. station lookup / join .-> L
     J --> I
+    G --> Q[Reconciliation summary]
+    L --> Q
 ```
 
 ## Data Model
@@ -104,6 +107,7 @@ Core tables currently defined through Flyway:
 Important design choices:
 
 - raw external payloads are stored for traceability
+- ingestion records reconciliation counts after raw payload parsing, normalization, skips, duplicate detection, and persistence outcomes
 - spatial data uses PostGIS
 - database migrations are source-controlled with Flyway
 - the model separates historical observations from the latest-price read model
@@ -123,12 +127,62 @@ The `station` model now persists:
 
 This keeps the primary street address simple while preserving the other location fields separately for future query and presentation needs.
 
+## Ingestion Reconciliation
+
+The ingestion orchestrator logs a reconciliation summary after each retailer batch has been parsed and processed.
+
+Reconciliation has a factual status and a separate runtime action:
+
+- `OK`: raw records reconcile with normalized and persisted outcomes, with no accounted skips
+- `OK_WITH_SKIPS`: counts reconcile, but known skips or duplicates were recorded
+- `FAILED`: at least one reconciliation formula has an unexplained mismatch
+
+The runtime action controls what happens when status is `FAILED`:
+
+- `FAIL`: aborts the retailer ingestion and returns a failed ingestion summary
+- `WARN`: logs the failed reconciliation but lets the ingestion business outcome remain successful
+
+Important distinction: in warn mode, the reconciliation status still remains `FAILED`; only the reaction policy changes.
+
+### Count Levels
+
+PFS station reconciliation is station-level:
+
+```text
+rawStationCount == normalizedStationCount + skippedCount
+```
+
+`skippedCount` is the aggregate used by the formula. The first specific skip reason tracked today is `skippedMissingSiteIdCount`.
+
+Fuel price reconciliation is split into two separate levels:
+
+```text
+rawFuelPriceEntryCount == normalizedObservationCount + skippedInvalidUnusableEntryCount
+```
+
+```text
+normalizedObservationCount == insertedCount + duplicateCount + missingStationCount + otherPersistenceSkipCount
+```
+
+This keeps raw-payload normalization accounting separate from persistence/business outcomes such as duplicates and missing stations.
+
+### Reconciliation Logs
+
+The structured reconciliation log includes:
+
+- retailer
+- raw feed fetch IDs
+- PFS raw, normalized, skipped, and upsert counts
+- fuel price raw entry, normalized observation, invalid/unusable skip, inserted, duplicate, missing-station, and other persistence-skip counts
+- reconciliation status, configured action, abort decision, and message
+
 ## API Endpoints
 
 Currently available read endpoints:
 
 - `GET /v1/stations/nearby`
 - `GET /v1/stations/cheapest-nearby`
+- `GET /v1/stations/in-bounds`
 - `GET /v1/stations/{stationId}`
 - `GET /v1/stations/{stationId}/price-history`
 - `GET /v1/stations/{stationId}/price-history/summary`
@@ -140,6 +194,12 @@ Nearby and cheapest-nearby endpoints accept:
 - `radiusMeters`
 - `fuelType`
 - `limit` optional, default `10`, max `100`
+
+In-bounds endpoint accepts:
+
+- `bbox` required, formatted as `west,south,east,north`
+- `fuelType`
+- `limit` optional, default `250`, max `500`
 
 Station details endpoint accepts:
 
@@ -172,6 +232,10 @@ http://localhost:8080/v1/stations/cheapest-nearby?lat=51.5074&lon=-0.1278&radius
 ```
 
 ```text
+http://localhost:8080/v1/stations/in-bounds?bbox=-0.20,51.45,-0.05,51.55&fuelType=E5&limit=250
+```
+
+```text
 http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000
 ```
 
@@ -187,6 +251,7 @@ Behavior:
 
 - `/nearby` sorts primarily by distance, then price
 - `/cheapest-nearby` sorts primarily by price, then distance
+- `/in-bounds` returns active station map markers inside the requested bounding box
 - `/v1/stations/{stationId}` returns a single station with full address, coordinates, and all latest prices by fuel type
 - `/v1/stations/{stationId}/price-history` returns historical observations from `price_observation` for one required `fuelType`
 - `/v1/stations/{stationId}/price-history/summary` returns daily UTC summary buckets for one required `fuelType`
@@ -318,21 +383,30 @@ The station read API uses local in-memory caches backed by Caffeine.
 
 Current defaults in [`backend/src/main/resources/application.yaml`](backend/src/main/resources/application.yaml):
 
+- `fuelfinder.ingestion.reconciliation.unexplained-mismatch-action=fail`
 - `fuelfinder.cache.nearby.ttl=60s`
 - `fuelfinder.cache.nearby.max-size=500`
 - `fuelfinder.cache.cheapest-nearby.ttl=60s`
 - `fuelfinder.cache.cheapest-nearby.max-size=500`
+- `fuelfinder.cache.in-bounds.ttl=60s`
+- `fuelfinder.cache.in-bounds.max-size=500`
 - `fuelfinder.cache.details.ttl=90s`
 - `fuelfinder.cache.details.max-size=1000`
 - `fuelfinder.cache.history.ttl=90s`
 - `fuelfinder.cache.history.max-size=1000`
+- `fuelfinder.cache.history-summary.ttl=90s`
+- `fuelfinder.cache.history-summary.max-size=1000`
 
 Notes:
 
+- `fuelfinder.ingestion.reconciliation.unexplained-mismatch-action` accepts `fail` or `warn`; use `warn` only when you want ingestion to continue after an unexplained reconciliation mismatch while still reporting `FAILED`
 - the cache is local to each application instance
-- cache entries are evicted automatically after `60s`
+- nearby, cheapest-nearby, and in-bounds cache entries are evicted automatically after `60s`
+- station details, price history, and price history summary cache entries are evicted automatically after `90s`
 - station detail responses are cached separately by `stationId`
+- in-bounds responses are cached by normalized bounding box, normalized `fuelType`, and resolved `limit`
 - station price history responses are cached by `stationId`, normalized `fuelType`, `from`, `to`, and resolved `limit`
+- station price history summary responses are cached by `stationId`, normalized `fuelType`, `from`, `to`, and resolved `limit`
 - detail-cache TTL should stay moderate because the payload includes latest prices as well as station metadata
 - all station-query caches are cleared after a successful transaction commit that changes the `latest_price` read model
 - history-cache entries are cleared after a successful transaction commit that changes `price_observation`
@@ -347,8 +421,10 @@ Current test coverage includes:
 
 - unit tests for OAuth token retrieval and Fuel Finder API clients
 - unit tests for ingestion orchestration, station normalization, latest-price projection, price observation ingestion, utility logic, station query services, and custom exceptions
+- reconciliation tests for `OK`, `OK_WITH_SKIPS`, `FAILED + FAIL`, `FAILED + WARN`, normalization skips, duplicate observations, and missing-station persistence outcomes
 - cache-focused tests for normalized query keys, repeated-query cache hits, and after-commit cache invalidation behavior
 - integration tests for JDBC repository writes against PostgreSQL/PostGIS
+- integration tests for station details, in-bounds queries, price history, price history summaries, and cache invalidation
 - integration tests for end-to-end ingestion, repeated-ingestion deduplication flows, and station field persistence
 
 Run the full backend test suite from [`backend/`](backend):
@@ -389,6 +465,12 @@ Run only selected integration tests:
 ./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.writer.JdbcRepositoriesIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.IngestionDedupeIT"
 ```
 
+Run all integration tests:
+
+```bash
+./gradlew test --tests "*IT"
+```
+
 Tests matching `*IT` run as part of the standard `test` task in this project. Integration tests require Docker because Testcontainers starts PostgreSQL/PostGIS containers automatically.
 
 ## Repository Layout
@@ -415,7 +497,7 @@ fuel-finder/
 
 Near-term priorities:
 
-- extend read APIs with station price history and richer filters
+- extend read APIs with richer filters and query shapes
 - extend integration tests to cover more ingestion edge cases and failure paths
 - raise and enforce JaCoCo coverage thresholds over time
 - align or remove unused JDBC write paths
