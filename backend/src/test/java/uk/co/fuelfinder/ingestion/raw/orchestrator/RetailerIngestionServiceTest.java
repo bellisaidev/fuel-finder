@@ -6,6 +6,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import uk.co.fuelfinder.ingestion.normalize.FuelPriceProcessingSummary;
 import uk.co.fuelfinder.ingestion.normalize.LatestPriceProjectionService;
 import uk.co.fuelfinder.ingestion.normalize.NormalizedStation;
 import uk.co.fuelfinder.ingestion.normalize.PfsStationNormalizer;
@@ -61,6 +62,9 @@ class RetailerIngestionServiceTest {
     @Mock
     private LatestPriceProjectionService latestPriceProjectionService;
 
+    @Mock
+    private IngestionReconciliationProperties reconciliationProperties;
+
     @InjectMocks
     private RetailerIngestionService retailerIngestionService;
 
@@ -79,8 +83,10 @@ class RetailerIngestionServiceTest {
 
         when(pfsClient.fetchBatch(1)).thenReturn(repeat(pfsStation, 500));
         when(pfsClient.fetchBatch(2)).thenReturn(List.of(pfsStation));
+        when(pfsClient.fetchBatch(3)).thenReturn(List.of());
         when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(repeat(fuelPricesStation, 500));
         when(fuelPricesClient.fetchFuelPrices(2)).thenReturn(List.of(fuelPricesStation));
+        when(fuelPricesClient.fetchFuelPrices(3)).thenReturn(List.of());
         when(rawFeedStorageService.store(
                 retailer,
                 FeedType.PFS,
@@ -100,7 +106,7 @@ class RetailerIngestionServiceTest {
         when(pfsStationNormalizer.normalize(any(PfsStationDto.class))).thenReturn(normalizedStation);
         when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
         when(priceObservationIngestionService.ingest(eq(retailer), eq(fuelPricesRawFeed), any(ArrayList.class)))
-                .thenReturn(501);
+                .thenReturn(fuelPriceSummary(501, 501, 501, 501));
         when(latestPriceProjectionService.backfillIfEmpty()).thenReturn(10);
 
         RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
@@ -113,11 +119,16 @@ class RetailerIngestionServiceTest {
         assertEquals(fuelPricesRawFeed.getId(), summary.getFuelPricesRawFeedFetchId());
         assertEquals(1, summary.getPfsBatchNumber());
         assertEquals(1, summary.getFuelPricesBatchNumber());
+        assertEquals(ReconciliationStatus.OK, summary.getReconciliationStatus());
+        assertEquals(ReconciliationAction.FAIL, summary.getReconciliationAction());
+        assertFalse(summary.isReconciliationShouldAbort());
 
         verify(pfsClient).fetchBatch(1);
         verify(pfsClient).fetchBatch(2);
+        verify(pfsClient).fetchBatch(3);
         verify(fuelPricesClient).fetchFuelPrices(1);
         verify(fuelPricesClient).fetchFuelPrices(2);
+        verify(fuelPricesClient).fetchFuelPrices(3);
         verify(rawFeedStorageService).store(retailer, FeedType.PFS, "/pfs", 1, repeat(pfsStation, 500, 1), 501);
         verify(rawFeedStorageService).store(
                 retailer,
@@ -129,6 +140,57 @@ class RetailerIngestionServiceTest {
         );
         verify(stationUpsertService, times(501)).upsert(retailer, normalizedStation);
         verify(latestPriceProjectionService).backfillIfEmpty();
+    }
+
+    @Test
+    void ingestContinuesFetchingWhenBatchContainsFewerThanPreviousPageSize() {
+        RetailerEntity retailer = retailer("Shell");
+        PfsStationDto pfsStation = pfsStation("site-1");
+        FuelPricesStationDto fuelPricesStation = fuelPricesStation("site-1");
+        NormalizedStation normalizedStation = NormalizedStation.builder()
+                .siteId("site-1")
+                .brand("Shell")
+                .active(true)
+                .build();
+        RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
+        RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
+
+        when(pfsClient.fetchBatch(1)).thenReturn(repeat(pfsStation, 498));
+        when(pfsClient.fetchBatch(2)).thenReturn(repeat(pfsStation, 498));
+        when(pfsClient.fetchBatch(3)).thenReturn(List.of());
+        when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(repeat(fuelPricesStation, 498));
+        when(fuelPricesClient.fetchFuelPrices(2)).thenReturn(repeat(fuelPricesStation, 498));
+        when(fuelPricesClient.fetchFuelPrices(3)).thenReturn(List.of());
+        when(rawFeedStorageService.store(
+                retailer,
+                FeedType.PFS,
+                "/pfs",
+                1,
+                repeat(pfsStation, 498, 498),
+                996
+        )).thenReturn(pfsRawFeed);
+        when(rawFeedStorageService.store(
+                retailer,
+                FeedType.FUEL_PRICES,
+                "/pfs/fuel-prices",
+                1,
+                repeat(fuelPricesStation, 498, 498),
+                996
+        )).thenReturn(fuelPricesRawFeed);
+        when(pfsStationNormalizer.normalize(any(PfsStationDto.class))).thenReturn(normalizedStation);
+        when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
+        when(priceObservationIngestionService.ingest(eq(retailer), eq(fuelPricesRawFeed), any(ArrayList.class)))
+                .thenReturn(fuelPriceSummary(996, 996, 996, 996));
+        when(latestPriceProjectionService.backfillIfEmpty()).thenReturn(0);
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertTrue(summary.isSuccess());
+        assertEquals(996, summary.getPfsRecordCount());
+        assertEquals(996, summary.getFuelPricesRecordCount());
+        verify(pfsClient).fetchBatch(3);
+        verify(fuelPricesClient).fetchFuelPrices(3);
+        verify(stationUpsertService, times(996)).upsert(retailer, normalizedStation);
     }
 
     @Test
@@ -160,7 +222,9 @@ class RetailerIngestionServiceTest {
         RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
 
         when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(pfsClient.fetchBatch(2)).thenReturn(List.of());
         when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(List.of(fuelPricesStation));
+        when(fuelPricesClient.fetchFuelPrices(2)).thenReturn(List.of());
         when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1)).thenReturn(pfsRawFeed);
         when(rawFeedStorageService.store(
                 retailer,
@@ -172,6 +236,8 @@ class RetailerIngestionServiceTest {
         )).thenReturn(fuelPricesRawFeed);
         when(pfsStationNormalizer.normalize(pfsStation)).thenReturn(normalizedStation);
         when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
+        when(priceObservationIngestionService.ingest(eq(retailer), eq(fuelPricesRawFeed), any(ArrayList.class)))
+                .thenReturn(fuelPriceSummary(1, 1, 1, 1));
 
         retailerIngestionService.ingest(retailer);
 
@@ -194,7 +260,7 @@ class RetailerIngestionServiceTest {
         when(rawFeedStorageService.store(retailer, FeedType.FUEL_PRICES, "/pfs/fuel-prices", 1, List.of(), 0))
                 .thenReturn(fuelPricesRawFeed);
         when(priceObservationIngestionService.ingest(retailer, fuelPricesRawFeed, new ArrayList<>()))
-                .thenReturn(0);
+                .thenReturn(fuelPriceSummary(0, 0, 0, 0));
         when(latestPriceProjectionService.backfillIfEmpty()).thenReturn(0);
 
         RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
@@ -204,12 +270,117 @@ class RetailerIngestionServiceTest {
         assertEquals(0, summary.getFuelPricesRecordCount());
         assertEquals(pfsRawFeed.getId(), summary.getPfsRawFeedFetchId());
         assertEquals(fuelPricesRawFeed.getId(), summary.getFuelPricesRawFeedFetchId());
+        assertEquals(ReconciliationStatus.OK, summary.getReconciliationStatus());
 
         verify(pfsClient).fetchBatch(1);
         verify(fuelPricesClient).fetchFuelPrices(1);
         verify(pfsStationNormalizer, never()).normalize(any());
         verify(stationUpsertService, never()).upsert(any(), any());
         verify(priceObservationIngestionService).ingest(eq(retailer), eq(fuelPricesRawFeed), eq(new ArrayList<>()));
+        verify(latestPriceProjectionService).backfillIfEmpty();
+    }
+
+    @Test
+    void ingestSkipsPfsStationsWithoutSiteId() {
+        RetailerEntity retailer = retailer("Texaco");
+        PfsStationDto validPfsStation = pfsStation("site-40");
+        PfsStationDto invalidPfsStation = pfsStation(null);
+        FuelPricesStationDto fuelPricesStation = fuelPricesStation("site-40");
+        NormalizedStation validNormalizedStation = NormalizedStation.builder().siteId("site-40").active(true).build();
+        NormalizedStation invalidNormalizedStation = NormalizedStation.builder().active(true).build();
+        RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
+        RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
+
+        when(pfsClient.fetchBatch(1)).thenReturn(List.of(validPfsStation, invalidPfsStation));
+        when(pfsClient.fetchBatch(2)).thenReturn(List.of());
+        when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(List.of(fuelPricesStation));
+        when(fuelPricesClient.fetchFuelPrices(2)).thenReturn(List.of());
+        when(rawFeedStorageService.store(
+                retailer,
+                FeedType.PFS,
+                "/pfs",
+                1,
+                List.of(validPfsStation, invalidPfsStation),
+                2
+        )).thenReturn(pfsRawFeed);
+        when(rawFeedStorageService.store(retailer, FeedType.FUEL_PRICES, "/pfs/fuel-prices", 1, List.of(fuelPricesStation), 1))
+                .thenReturn(fuelPricesRawFeed);
+        when(pfsStationNormalizer.normalize(validPfsStation)).thenReturn(validNormalizedStation);
+        when(pfsStationNormalizer.normalize(invalidPfsStation)).thenReturn(invalidNormalizedStation);
+        when(stationUpsertService.upsert(retailer, validNormalizedStation)).thenReturn(1);
+        when(priceObservationIngestionService.ingest(retailer, fuelPricesRawFeed, new ArrayList<>(List.of(fuelPricesStation))))
+                .thenReturn(fuelPriceSummary(1, 1, 1, 1));
+        when(latestPriceProjectionService.backfillIfEmpty()).thenReturn(0);
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertTrue(summary.isSuccess());
+        assertEquals(2, summary.getPfsRecordCount());
+        assertEquals(ReconciliationStatus.OK_WITH_SKIPS, summary.getReconciliationStatus());
+        verify(stationUpsertService).upsert(retailer, validNormalizedStation);
+        verify(stationUpsertService, never()).upsert(retailer, invalidNormalizedStation);
+    }
+
+    @Test
+    void ingestReturnsFailureSummaryWhenReconciliationFailsWithFailAction() {
+        RetailerEntity retailer = retailer("ReconcileFail");
+        PfsStationDto pfsStation = pfsStation("site-50");
+        FuelPricesStationDto fuelPricesStation = fuelPricesStation("site-50");
+        NormalizedStation normalizedStation = NormalizedStation.builder().siteId("site-50").active(true).build();
+        RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
+        RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
+
+        when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(pfsClient.fetchBatch(2)).thenReturn(List.of());
+        when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(List.of(fuelPricesStation));
+        when(fuelPricesClient.fetchFuelPrices(2)).thenReturn(List.of());
+        when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1)).thenReturn(pfsRawFeed);
+        when(rawFeedStorageService.store(retailer, FeedType.FUEL_PRICES, "/pfs/fuel-prices", 1, List.of(fuelPricesStation), 1))
+                .thenReturn(fuelPricesRawFeed);
+        when(pfsStationNormalizer.normalize(pfsStation)).thenReturn(normalizedStation);
+        when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
+        when(reconciliationProperties.getUnexplainedMismatchAction()).thenReturn(ReconciliationAction.FAIL);
+        when(priceObservationIngestionService.ingest(retailer, fuelPricesRawFeed, new ArrayList<>(List.of(fuelPricesStation))))
+                .thenReturn(unreconciledFuelPriceSummary());
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertFalse(summary.isSuccess());
+        assertEquals(ReconciliationStatus.FAILED, summary.getReconciliationStatus());
+        assertEquals(ReconciliationAction.FAIL, summary.getReconciliationAction());
+        assertTrue(summary.isReconciliationShouldAbort());
+        verify(latestPriceProjectionService, never()).backfillIfEmpty();
+    }
+
+    @Test
+    void ingestContinuesWhenReconciliationFailsWithWarnAction() {
+        RetailerEntity retailer = retailer("ReconcileWarn");
+        PfsStationDto pfsStation = pfsStation("site-60");
+        FuelPricesStationDto fuelPricesStation = fuelPricesStation("site-60");
+        NormalizedStation normalizedStation = NormalizedStation.builder().siteId("site-60").active(true).build();
+        RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
+        RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
+
+        when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(pfsClient.fetchBatch(2)).thenReturn(List.of());
+        when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(List.of(fuelPricesStation));
+        when(fuelPricesClient.fetchFuelPrices(2)).thenReturn(List.of());
+        when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1)).thenReturn(pfsRawFeed);
+        when(rawFeedStorageService.store(retailer, FeedType.FUEL_PRICES, "/pfs/fuel-prices", 1, List.of(fuelPricesStation), 1))
+                .thenReturn(fuelPricesRawFeed);
+        when(pfsStationNormalizer.normalize(pfsStation)).thenReturn(normalizedStation);
+        when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
+        when(reconciliationProperties.getUnexplainedMismatchAction()).thenReturn(ReconciliationAction.WARN);
+        when(priceObservationIngestionService.ingest(retailer, fuelPricesRawFeed, new ArrayList<>(List.of(fuelPricesStation))))
+                .thenReturn(unreconciledFuelPriceSummary());
+        when(latestPriceProjectionService.backfillIfEmpty()).thenReturn(0);
+
+        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+
+        assertTrue(summary.isSuccess());
+        assertEquals(ReconciliationStatus.FAILED, summary.getReconciliationStatus());
+        assertEquals(ReconciliationAction.WARN, summary.getReconciliationAction());
+        assertFalse(summary.isReconciliationShouldAbort());
         verify(latestPriceProjectionService).backfillIfEmpty();
     }
 
@@ -221,6 +392,7 @@ class RetailerIngestionServiceTest {
         RawFeedFetchEntity pfsRawFeed = rawFeedFetch(FeedType.PFS);
 
         when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(pfsClient.fetchBatch(2)).thenReturn(List.of());
         when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1)).thenReturn(pfsRawFeed);
         when(pfsStationNormalizer.normalize(pfsStation)).thenReturn(normalizedStation);
         when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
@@ -247,6 +419,7 @@ class RetailerIngestionServiceTest {
         PfsStationDto pfsStation = pfsStation("site-20");
 
         when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(pfsClient.fetchBatch(2)).thenReturn(List.of());
         when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1))
                 .thenThrow(new IllegalStateException("PFS store failed"));
 
@@ -271,14 +444,16 @@ class RetailerIngestionServiceTest {
         RawFeedFetchEntity fuelPricesRawFeed = rawFeedFetch(FeedType.FUEL_PRICES);
 
         when(pfsClient.fetchBatch(1)).thenReturn(List.of(pfsStation));
+        when(pfsClient.fetchBatch(2)).thenReturn(List.of());
         when(fuelPricesClient.fetchFuelPrices(1)).thenReturn(List.of(fuelPricesStation));
+        when(fuelPricesClient.fetchFuelPrices(2)).thenReturn(List.of());
         when(rawFeedStorageService.store(retailer, FeedType.PFS, "/pfs", 1, List.of(pfsStation), 1)).thenReturn(pfsRawFeed);
         when(rawFeedStorageService.store(retailer, FeedType.FUEL_PRICES, "/pfs/fuel-prices", 1, List.of(fuelPricesStation), 1))
                 .thenReturn(fuelPricesRawFeed);
         when(pfsStationNormalizer.normalize(pfsStation)).thenReturn(normalizedStation);
         when(stationUpsertService.upsert(retailer, normalizedStation)).thenReturn(1);
         when(priceObservationIngestionService.ingest(retailer, fuelPricesRawFeed, new ArrayList<>(List.of(fuelPricesStation))))
-                .thenReturn(1);
+                .thenReturn(fuelPriceSummary(1, 1, 1, 1));
         when(latestPriceProjectionService.backfillIfEmpty()).thenThrow(new IllegalStateException("Backfill failed"));
 
         RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
@@ -329,6 +504,37 @@ class RetailerIngestionServiceTest {
                 .nodeId(siteId)
                 .tradingName("Brand")
                 .fuelPrices(List.of(FuelPriceDto.builder().fuelType("E10").price(new BigDecimal("1.459")).build()))
+                .build();
+    }
+
+    private static FuelPriceProcessingSummary fuelPriceSummary(
+            int rawStationCount,
+            int rawFuelPriceEntryCount,
+            int normalizedObservationCount,
+            int insertedCount
+    ) {
+        return FuelPriceProcessingSummary.builder()
+                .rawStationCount(rawStationCount)
+                .rawFuelPriceEntryCount(rawFuelPriceEntryCount)
+                .normalizedObservationCount(normalizedObservationCount)
+                .skippedInvalidUnusableEntryCount(Math.max(rawFuelPriceEntryCount - normalizedObservationCount, 0))
+                .insertedCount(insertedCount)
+                .duplicateCount(0)
+                .missingStationCount(0)
+                .otherPersistenceSkipCount(0)
+                .build();
+    }
+
+    private static FuelPriceProcessingSummary unreconciledFuelPriceSummary() {
+        return FuelPriceProcessingSummary.builder()
+                .rawStationCount(1)
+                .rawFuelPriceEntryCount(2)
+                .normalizedObservationCount(1)
+                .skippedInvalidUnusableEntryCount(0)
+                .insertedCount(1)
+                .duplicateCount(0)
+                .missingStationCount(0)
+                .otherPersistenceSkipCount(0)
                 .build();
     }
 

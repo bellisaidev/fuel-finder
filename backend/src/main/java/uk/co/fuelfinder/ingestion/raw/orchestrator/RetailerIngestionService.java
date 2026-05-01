@@ -3,6 +3,7 @@ package uk.co.fuelfinder.ingestion.raw.orchestrator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import uk.co.fuelfinder.ingestion.normalize.FuelPriceProcessingSummary;
 import uk.co.fuelfinder.ingestion.normalize.NormalizedStation;
 import uk.co.fuelfinder.ingestion.normalize.PfsStationNormalizer;
 import uk.co.fuelfinder.ingestion.normalize.LatestPriceProjectionService;
@@ -27,7 +28,7 @@ import java.util.List;
 public class RetailerIngestionService {
 
     private static final int DEFAULT_BATCH_NUMBER = 1;
-    private static final int PAGE_SIZE = 500;
+    private static final int MAX_BATCH_COUNT = 100;
 
     private static final String PFS_ENDPOINT_PATH = "/pfs";
     private static final String FUEL_PRICES_ENDPOINT_PATH = "/pfs/fuel-prices";
@@ -39,6 +40,7 @@ public class RetailerIngestionService {
     private final StationUpsertService stationUpsertService;
     private final PriceObservationIngestionService priceObservationIngestionService;
     private final LatestPriceProjectionService latestPriceProjectionService;
+    private final IngestionReconciliationProperties reconciliationProperties;
 
     public RawIngestionSummary ingest(RetailerEntity retailer) {
         Instant startedAt = Instant.now();
@@ -59,11 +61,15 @@ public class RetailerIngestionService {
                     pfsStations.size()
             );
 
-            int stationUpserts = normalizeAndUpsertStations(retailer, pfsStations);
+            PfsStationProcessingSummary pfsProcessingSummary = normalizeAndUpsertStations(retailer, pfsStations);
             log.info(
-                    "Station normalization completed for retailer={}: stationUpserts={}",
+                    "Station normalization completed for retailer={}: rawStationCount={}, normalizedStationCount={}, skippedCount={}, skippedMissingSiteIdCount={}, stationUpserts={}",
                     retailerName,
-                    stationUpserts
+                    pfsProcessingSummary.rawStationCount(),
+                    pfsProcessingSummary.normalizedStationCount(),
+                    pfsProcessingSummary.skippedCount(),
+                    pfsProcessingSummary.skippedMissingSiteIdCount(),
+                    pfsProcessingSummary.stationUpsertCount()
             );
 
             PagedFetchResult<FuelPricesStationDto> fuelPricesResult = fetchAllFuelPrices(retailerName);
@@ -78,11 +84,29 @@ public class RetailerIngestionService {
                     fuelPricesStations.size()
             );
 
-            int observationsInserted = priceObservationIngestionService.ingest(
+            FuelPriceProcessingSummary fuelPriceProcessingSummary = priceObservationIngestionService.ingest(
                     retailer,
                     fuelPricesRawFeed,
                     new ArrayList<>(fuelPricesStations)
             );
+            ReconciliationDecision reconciliationDecision = ReconciliationDecision.evaluate(
+                    pfsProcessingSummary,
+                    fuelPriceProcessingSummary,
+                    reconciliationProperties.getUnexplainedMismatchAction()
+            );
+            logReconciliationSummary(
+                    retailerName,
+                    pfsRawFeed,
+                    fuelPricesRawFeed,
+                    pfsProcessingSummary,
+                    fuelPriceProcessingSummary,
+                    reconciliationDecision
+            );
+
+            if (reconciliationDecision.shouldAbort()) {
+                throw new ReconciliationException(reconciliationDecision);
+            }
+
             int latestPricesBackfilled = latestPriceProjectionService.backfillIfEmpty();
 
             RawIngestionSummary summary = RawIngestionSummary.success(
@@ -93,7 +117,8 @@ public class RetailerIngestionService {
                     pfsRawFeed.getId(),
                     DEFAULT_BATCH_NUMBER,
                     fuelPricesStations.size(),
-                    fuelPricesRawFeed.getId()
+                    fuelPricesRawFeed.getId(),
+                    reconciliationDecision
             );
 
             log.info(
@@ -103,8 +128,8 @@ public class RetailerIngestionService {
                     pfsResult.batchCount(),
                     summary.getFuelPricesRecordCount(),
                     fuelPricesResult.batchCount(),
-                    stationUpserts,
-                    observationsInserted,
+                    pfsProcessingSummary.stationUpsertCount(),
+                    fuelPriceProcessingSummary.insertedCount(),
                     latestPricesBackfilled,
                     summary.getPfsRawFeedFetchId(),
                     summary.getFuelPricesRawFeedFetchId()
@@ -112,6 +137,15 @@ public class RetailerIngestionService {
 
             return summary;
 
+        } catch (ReconciliationException e) {
+            log.error("Ingestion reconciliation failed for retailer={}: {}", retailerName, e.getMessage());
+
+            return RawIngestionSummary.failed(
+                    retailerName,
+                    startedAt,
+                    e.getMessage() == null ? "Unknown reconciliation error" : e.getMessage(),
+                    e.getDecision()
+            );
         } catch (Exception e) {
             log.error("Ingestion failed for retailer={}: {}", retailerName, e.getMessage(), e);
 
@@ -145,11 +179,10 @@ public class RetailerIngestionService {
             allStations.addAll(batch);
             batchCount++;
 
-            if (batch.size() < PAGE_SIZE) {
-                break;
-            }
-
             batchNumber++;
+            if (batchCount >= MAX_BATCH_COUNT) {
+                throw new IllegalStateException("PFS pagination exceeded maximum batch count " + MAX_BATCH_COUNT);
+            }
         }
 
         log.info(
@@ -184,11 +217,12 @@ public class RetailerIngestionService {
             allFuelPricesStations.addAll(batch);
             batchCount++;
 
-            if (batch.size() < PAGE_SIZE) {
-                break;
-            }
-
             batchNumber++;
+            if (batchCount >= MAX_BATCH_COUNT) {
+                throw new IllegalStateException(
+                        "Fuel prices pagination exceeded maximum batch count " + MAX_BATCH_COUNT
+                );
+            }
         }
 
         log.info(
@@ -201,15 +235,108 @@ public class RetailerIngestionService {
         return new PagedFetchResult<>(allFuelPricesStations, batchCount);
     }
 
-    private int normalizeAndUpsertStations(RetailerEntity retailer, List<PfsStationDto> pfsStations) {
+    private PfsStationProcessingSummary normalizeAndUpsertStations(RetailerEntity retailer, List<PfsStationDto> pfsStations) {
+        int normalizedStations = 0;
         int stationUpserts = 0;
+        int skippedStations = 0;
+        int skippedMissingSiteId = 0;
 
         for (PfsStationDto dto : pfsStations) {
             NormalizedStation normalizedStation = pfsStationNormalizer.normalize(dto);
+
+            if (normalizedStation.getSiteId() == null || normalizedStation.getSiteId().isBlank()) {
+                skippedStations++;
+                skippedMissingSiteId++;
+                log.warn(
+                        "Skipping PFS station without site id: retailer={}, tradingName={}, brandName={}",
+                        retailer.getName(),
+                        dto.tradingName(),
+                        dto.brandName()
+                );
+                continue;
+            }
+
+            normalizedStations++;
             stationUpserts += stationUpsertService.upsert(retailer, normalizedStation);
         }
 
-        return stationUpserts;
+        if (skippedStations > 0) {
+            log.warn(
+                    "Skipped PFS stations without site id: retailer={}, skippedStations={}",
+                    retailer.getName(),
+                    skippedMissingSiteId
+            );
+        }
+
+        return PfsStationProcessingSummary.builder()
+                .rawStationCount(pfsStations.size())
+                .normalizedStationCount(normalizedStations)
+                .skippedCount(skippedStations)
+                .skippedMissingSiteIdCount(skippedMissingSiteId)
+                .stationUpsertCount(stationUpserts)
+                .build();
+    }
+
+    private void logReconciliationSummary(
+            String retailerName,
+            RawFeedFetchEntity pfsRawFeed,
+            RawFeedFetchEntity fuelPricesRawFeed,
+            PfsStationProcessingSummary pfsSummary,
+            FuelPriceProcessingSummary fuelPriceSummary,
+            ReconciliationDecision decision
+    ) {
+        String logMessage = "Ingestion reconciliation summary: retailer={}, pfsRawFeedFetchId={}, fuelPricesRawFeedFetchId={}, pfsRawStationCount={}, pfsNormalizedStationCount={}, pfsSkippedCount={}, pfsSkippedMissingSiteIdCount={}, pfsStationUpsertCount={}, fuelPriceRawStationCount={}, fuelPriceRawEntryCount={}, fuelPriceNormalizedObservationCount={}, fuelPriceSkippedInvalidUnusableEntryCount={}, fuelPriceInsertedCount={}, fuelPriceDuplicateCount={}, fuelPriceMissingStationCount={}, fuelPriceOtherPersistenceSkipCount={}, status={}, action={}, shouldAbort={}, message={}";
+
+        if (decision.status() == ReconciliationStatus.FAILED) {
+            log.warn(
+                    logMessage,
+                    retailerName,
+                    pfsRawFeed.getId(),
+                    fuelPricesRawFeed.getId(),
+                    pfsSummary.rawStationCount(),
+                    pfsSummary.normalizedStationCount(),
+                    pfsSummary.skippedCount(),
+                    pfsSummary.skippedMissingSiteIdCount(),
+                    pfsSummary.stationUpsertCount(),
+                    fuelPriceSummary.rawStationCount(),
+                    fuelPriceSummary.rawFuelPriceEntryCount(),
+                    fuelPriceSummary.normalizedObservationCount(),
+                    fuelPriceSummary.skippedInvalidUnusableEntryCount(),
+                    fuelPriceSummary.insertedCount(),
+                    fuelPriceSummary.duplicateCount(),
+                    fuelPriceSummary.missingStationCount(),
+                    fuelPriceSummary.otherPersistenceSkipCount(),
+                    decision.status(),
+                    decision.action(),
+                    decision.shouldAbort(),
+                    decision.message()
+            );
+            return;
+        }
+
+        log.info(
+                logMessage,
+                retailerName,
+                pfsRawFeed.getId(),
+                fuelPricesRawFeed.getId(),
+                pfsSummary.rawStationCount(),
+                pfsSummary.normalizedStationCount(),
+                pfsSummary.skippedCount(),
+                pfsSummary.skippedMissingSiteIdCount(),
+                pfsSummary.stationUpsertCount(),
+                fuelPriceSummary.rawStationCount(),
+                fuelPriceSummary.rawFuelPriceEntryCount(),
+                fuelPriceSummary.normalizedObservationCount(),
+                fuelPriceSummary.skippedInvalidUnusableEntryCount(),
+                fuelPriceSummary.insertedCount(),
+                fuelPriceSummary.duplicateCount(),
+                fuelPriceSummary.missingStationCount(),
+                fuelPriceSummary.otherPersistenceSkipCount(),
+                decision.status(),
+                decision.action(),
+                decision.shouldAbort(),
+                decision.message()
+        );
     }
 
     private record PagedFetchResult<T>(
