@@ -44,6 +44,11 @@ public class FuelFinderFuelPricesClient {
                             .build())
                     .headers(headers -> headers.setBearerAuth(tokenProvider.getAccessToken()))
                     .retrieve()
+                    .onStatus(
+                            status -> status.isError(),
+                            clientResponse -> clientResponse.bodyToMono(String.class)
+                                    .map(body -> mapError(batchNumber, clientResponse.statusCode().toString(), body))
+                    )
                     .bodyToMono(new ParameterizedTypeReference<List<FuelPricesStationDto>>() {})
                     .block();
 
@@ -59,6 +64,12 @@ public class FuelFinderFuelPricesClient {
             logSample(response);
 
             return response;
+        } catch (FuelFinderBatchUnavailableException e) {
+            log.info(
+                    "Fuel Finder fuel prices batch {} is not available; treating it as end of feed",
+                    batchNumber
+            );
+            return List.of();
         } catch (FuelFinderAuthenticationException | FuelFinderConnectivityException | FuelFinderInvalidResponseException e) {
             throw e;
         } catch (Exception e) {
@@ -66,6 +77,16 @@ public class FuelFinderFuelPricesClient {
                     "Unexpected error while fetching Fuel Finder fuel prices batch " + batchNumber, e
             );
         }
+    }
+
+    private RuntimeException mapError(int batchNumber, String statusCode, String body) {
+        if (body != null && body.contains("Requested batch " + batchNumber + " is not available")) {
+            return new FuelFinderBatchUnavailableException(body);
+        }
+
+        return new FuelFinderIntegrationException(
+                "Fuel Finder fuel prices request failed: status=" + statusCode + ", body=" + body
+        );
     }
 
     private void logSample(List<FuelPricesStationDto> stations) {

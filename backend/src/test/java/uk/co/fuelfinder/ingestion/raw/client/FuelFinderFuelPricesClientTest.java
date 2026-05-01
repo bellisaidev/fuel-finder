@@ -63,6 +63,31 @@ class FuelFinderFuelPricesClientTest {
     }
 
     @Test
+    void fetchFuelPricesAcceptsSiteIdAsStationIdentifierAlias() {
+        FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
+        when(tokenProvider.getAccessToken()).thenReturn("token-456");
+
+        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+                WebClient.builder()
+                        .exchangeFunction(request -> jsonResponse(HttpStatus.OK, """
+                                [
+                                  {
+                                    "site_id": "site-12",
+                                    "fuel_prices": []
+                                  }
+                                ]
+                                """))
+                        .build(),
+                tokenProvider
+        );
+
+        List<FuelPricesStationDto> stations = client.fetchFuelPrices(1);
+
+        assertThat(stations).hasSize(1);
+        assertThat(stations.getFirst().nodeId()).isEqualTo("site-12");
+    }
+
+    @Test
     void fetchFuelPricesReturnsEmptyListForEmptyArray() {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
@@ -75,6 +100,29 @@ class FuelFinderFuelPricesClientTest {
         );
 
         assertThat(client.fetchFuelPrices(2)).isEmpty();
+    }
+
+    @Test
+    void fetchFuelPricesReturnsEmptyListWhenRequestedBatchIsUnavailable() {
+        FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
+        when(tokenProvider.getAccessToken()).thenReturn("token-456");
+
+        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+                WebClient.builder()
+                        .exchangeFunction(request -> jsonResponse(HttpStatus.NOT_FOUND, """
+                                {
+                                  "data": {
+                                    "data": {
+                                      "message": "Requested batch 6 is not available"
+                                    }
+                                  }
+                                }
+                                """))
+                        .build(),
+                tokenProvider
+        );
+
+        assertThat(client.fetchFuelPrices(6)).isEmpty();
     }
 
     @Test

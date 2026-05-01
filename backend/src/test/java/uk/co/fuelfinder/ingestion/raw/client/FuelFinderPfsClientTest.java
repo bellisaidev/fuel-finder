@@ -61,6 +61,31 @@ class FuelFinderPfsClientTest {
     }
 
     @Test
+    void fetchBatchAcceptsSiteIdAsStationIdentifierAlias() {
+        FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
+        when(tokenProvider.getAccessToken()).thenReturn("token-123");
+
+        FuelFinderPfsClient client = new FuelFinderPfsClient(
+                WebClient.builder()
+                        .exchangeFunction(request -> jsonResponse(HttpStatus.OK, """
+                                [
+                                  {
+                                    "site_id": "site-10",
+                                    "trading_name": "Alias Station"
+                                  }
+                                ]
+                                """))
+                        .build(),
+                tokenProvider
+        );
+
+        List<PfsStationDto> stations = client.fetchBatch(1);
+
+        assertThat(stations).hasSize(1);
+        assertThat(stations.getFirst().nodeId()).isEqualTo("site-10");
+    }
+
+    @Test
     void fetchBatchReturnsEmptyListForEmptyResponseArray() {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-123");
@@ -73,6 +98,29 @@ class FuelFinderPfsClientTest {
         );
 
         assertThat(client.fetchBatch(1)).isEmpty();
+    }
+
+    @Test
+    void fetchBatchReturnsEmptyListWhenRequestedBatchIsUnavailable() {
+        FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
+        when(tokenProvider.getAccessToken()).thenReturn("token-123");
+
+        FuelFinderPfsClient client = new FuelFinderPfsClient(
+                WebClient.builder()
+                        .exchangeFunction(request -> jsonResponse(HttpStatus.NOT_FOUND, """
+                                {
+                                  "data": {
+                                    "data": {
+                                      "message": "Requested batch 6 is not available"
+                                    }
+                                  }
+                                }
+                                """))
+                        .build(),
+                tokenProvider
+        );
+
+        assertThat(client.fetchBatch(6)).isEmpty();
     }
 
     @Test

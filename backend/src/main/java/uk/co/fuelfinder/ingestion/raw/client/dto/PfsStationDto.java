@@ -1,10 +1,12 @@
 package uk.co.fuelfinder.ingestion.raw.client.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 
 public record PfsStationDto(
+        @JsonAlias({"site_id", "siteId"})
         @JsonProperty("node_id")
         String nodeId,
 
