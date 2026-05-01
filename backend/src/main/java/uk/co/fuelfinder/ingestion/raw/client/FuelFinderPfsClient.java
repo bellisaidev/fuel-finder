@@ -31,24 +31,27 @@ public class FuelFinderPfsClient {
 
         log.info("Fetching Fuel Finder PFS batch {}", batchNumber);
 
-        List<PfsStationDto> stations = fuelFinderApiWebClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/pfs")
-                        .queryParam("batch-number", batchNumber)
-                        .build())
-                .headers(headers -> headers.setBearerAuth(accessToken))
-                .accept(MediaType.APPLICATION_JSON)
-                .retrieve()
-                .onStatus(
-                        status -> status.isError(),
-                        response -> response.bodyToMono(String.class)
-                                .map(body -> new IllegalStateException(
-                                        "Fuel Finder PFS request failed: status="
-                                                + response.statusCode()
-                                                + ", body=" + body))
-                )
-                .bodyToMono(new ParameterizedTypeReference<List<PfsStationDto>>() {})
-                .block();
+        List<PfsStationDto> stations;
+        try {
+            stations = fuelFinderApiWebClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/pfs")
+                            .queryParam("batch-number", batchNumber)
+                            .build())
+                    .headers(headers -> headers.setBearerAuth(accessToken))
+                    .accept(MediaType.APPLICATION_JSON)
+                    .retrieve()
+                    .onStatus(
+                            status -> status.isError(),
+                            response -> response.bodyToMono(String.class)
+                                    .map(body -> mapError(batchNumber, response.statusCode().toString(), body))
+                    )
+                    .bodyToMono(new ParameterizedTypeReference<List<PfsStationDto>>() {})
+                    .block();
+        } catch (FuelFinderBatchUnavailableException e) {
+            log.info("Fuel Finder PFS batch {} is not available; treating it as end of feed", batchNumber);
+            return List.of();
+        }
 
         if (stations == null) {
             throw new IllegalStateException("Fuel Finder PFS response was null");
@@ -56,5 +59,15 @@ public class FuelFinderPfsClient {
 
         log.info("Fuel Finder PFS batch {} fetched successfully: {} stations", batchNumber, stations.size());
         return stations;
+    }
+
+    private RuntimeException mapError(int batchNumber, String statusCode, String body) {
+        if (body != null && body.contains("Requested batch " + batchNumber + " is not available")) {
+            return new FuelFinderBatchUnavailableException(body);
+        }
+
+        return new IllegalStateException(
+                "Fuel Finder PFS request failed: status=" + statusCode + ", body=" + body
+        );
     }
 }

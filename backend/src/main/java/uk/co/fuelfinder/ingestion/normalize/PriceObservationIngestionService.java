@@ -34,19 +34,23 @@ public class PriceObservationIngestionService {
     private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional
-    public int ingest(
+    public FuelPriceProcessingSummary ingest(
             RetailerEntity retailer,
             RawFeedFetchEntity rawFeedFetch,
             List<FuelPricesStationDto> fuelPricesStations
     ) {
         validateInput(retailer, rawFeedFetch, fuelPricesStations);
 
+        int rawFuelPriceEntryCount = 0;
+        int normalizedObservationCount = 0;
         int inserted = 0;
         int skippedMissingStation = 0;
         int skippedDuplicate = 0;
 
         for (FuelPricesStationDto stationDto : fuelPricesStations) {
+            rawFuelPriceEntryCount += stationDto.fuelPrices() == null ? 0 : stationDto.fuelPrices().size();
             List<NormalizedPriceObservation> normalizedObservations = fuelPricesNormalizer.normalize(stationDto);
+            normalizedObservationCount += normalizedObservations.size();
 
             for (NormalizedPriceObservation normalized : normalizedObservations) {
                 StationEntity station = stationRepository.findByRetailerAndSiteId(retailer, normalized.getSiteId())
@@ -92,13 +96,30 @@ public class PriceObservationIngestionService {
             }
         }
 
+        int skippedInvalidUnusableEntries = Math.max(rawFuelPriceEntryCount - normalizedObservationCount, 0);
+        FuelPriceProcessingSummary summary = FuelPriceProcessingSummary.builder()
+                .rawStationCount(fuelPricesStations.size())
+                .rawFuelPriceEntryCount(rawFuelPriceEntryCount)
+                .normalizedObservationCount(normalizedObservationCount)
+                .skippedInvalidUnusableEntryCount(skippedInvalidUnusableEntries)
+                .insertedCount(inserted)
+                .duplicateCount(skippedDuplicate)
+                .missingStationCount(skippedMissingStation)
+                .otherPersistenceSkipCount(0)
+                .build();
+
         log.info(
-                "Price observation ingestion completed: retailer={}, rawFeedFetchId={}, inserted={}, skippedDuplicate={}, skippedMissingStation={}",
+                "Price observation ingestion completed: retailer={}, rawFeedFetchId={}, rawStationCount={}, rawFuelPriceEntryCount={}, normalizedObservationCount={}, skippedInvalidUnusableEntryCount={}, inserted={}, skippedDuplicate={}, skippedMissingStation={}, otherPersistenceSkipCount={}",
                 retailer.getName(),
                 rawFeedFetch.getId(),
+                summary.rawStationCount(),
+                summary.rawFuelPriceEntryCount(),
+                summary.normalizedObservationCount(),
+                summary.skippedInvalidUnusableEntryCount(),
                 inserted,
                 skippedDuplicate,
-                skippedMissingStation
+                skippedMissingStation,
+                summary.otherPersistenceSkipCount()
         );
 
         if (inserted > 0) {
@@ -106,7 +127,7 @@ public class PriceObservationIngestionService {
             applicationEventPublisher.publishEvent(new LatestPricesChangedEvent("price-observation-ingestion"));
         }
 
-        return inserted;
+        return summary;
     }
 
     private String buildSourceHash(

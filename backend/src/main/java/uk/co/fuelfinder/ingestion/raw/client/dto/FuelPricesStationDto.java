@@ -1,5 +1,6 @@
 package uk.co.fuelfinder.ingestion.raw.client.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
@@ -9,6 +10,7 @@ import java.util.List;
 @Builder
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record FuelPricesStationDto(
+        @JsonAlias({"site_id", "siteId"})
         @JsonProperty("node_id")
         String nodeId,
 

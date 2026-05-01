@@ -33,6 +33,7 @@ Available station endpoints:
 
 - `GET /v1/stations/nearby`
 - `GET /v1/stations/cheapest-nearby`
+- `GET /v1/stations/in-bounds`
 - `GET /v1/stations/{stationId}`
 - `GET /v1/stations/{stationId}/price-history`
 - `GET /v1/stations/{stationId}/price-history/summary`
@@ -41,6 +42,7 @@ Station query caching uses local Caffeine caches for:
 
 - `nearbyStations`
 - `cheapestNearbyStations`
+- `inBoundsStations`
 - `stationDetails`
 - `stationPriceHistory`
 - `stationPriceHistorySummary`
@@ -52,6 +54,12 @@ Nearby and cheapest-nearby endpoints accept:
 - `radiusMeters`
 - `fuelType`
 - `limit` (optional, default `10`, max `100`)
+
+In-bounds endpoint accepts:
+
+- `bbox` required, formatted as `west,south,east,north`
+- `fuelType`
+- `limit` optional, default `250`, max `500`
 
 Station details endpoint accepts:
 
@@ -85,3 +93,32 @@ The normalized `station` model now stores:
 - `location` as PostGIS geography point
 
 These fields are populated from the PFS feed normalization flow and exposed by the geospatial API.
+
+## Ingestion Reconciliation
+
+Retailer ingestion logs a reconciliation summary after parsing and processing each batch.
+
+Statuses:
+
+- `OK`
+- `OK_WITH_SKIPS`
+- `FAILED`
+
+Runtime action is configured separately:
+
+```yaml
+fuelfinder:
+  ingestion:
+    reconciliation:
+      unexplained-mismatch-action: fail
+```
+
+Accepted values are `fail` and `warn`. In `warn` mode, a failed reconciliation still reports status `FAILED`; ingestion is allowed to continue.
+
+## Integration Tests
+
+Run all integration tests from [`backend/`](.):
+
+```powershell
+.\gradlew.bat test --tests "*IT"
+```

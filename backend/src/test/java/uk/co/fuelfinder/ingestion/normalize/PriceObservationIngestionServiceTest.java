@@ -56,7 +56,7 @@ class PriceObservationIngestionServiceTest {
     void ingestStoresObservationAndProjectsLatestPrice() {
         RetailerEntity retailer = retailer();
         RawFeedFetchEntity rawFeedFetch = rawFeedFetch();
-        FuelPricesStationDto stationDto = FuelPricesStationDto.builder().nodeId("site-1").build();
+        FuelPricesStationDto stationDto = fuelPricesStation("site-1", "E10", "1.459");
         NormalizedPriceObservation normalized = NormalizedPriceObservation.builder()
                 .siteId("site-1")
                 .fuelType("E10")
@@ -70,9 +70,19 @@ class PriceObservationIngestionServiceTest {
         when(priceObservationRepository.save(any(PriceObservationEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        int inserted = priceObservationIngestionService.ingest(retailer, rawFeedFetch, List.of(stationDto));
+        FuelPriceProcessingSummary summary = priceObservationIngestionService.ingest(
+                retailer,
+                rawFeedFetch,
+                List.of(stationDto)
+        );
 
-        assertEquals(1, inserted);
+        assertEquals(1, summary.rawStationCount());
+        assertEquals(1, summary.rawFuelPriceEntryCount());
+        assertEquals(1, summary.normalizedObservationCount());
+        assertEquals(0, summary.skippedInvalidUnusableEntryCount());
+        assertEquals(1, summary.insertedCount());
+        assertEquals(0, summary.duplicateCount());
+        assertEquals(0, summary.missingStationCount());
 
         ArgumentCaptor<PriceObservationEntity> captor = ArgumentCaptor.forClass(PriceObservationEntity.class);
         verify(priceObservationRepository).save(captor.capture());
@@ -91,7 +101,7 @@ class PriceObservationIngestionServiceTest {
     void ingestSkipsObservationWhenStationDoesNotExist() {
         RetailerEntity retailer = retailer();
         RawFeedFetchEntity rawFeedFetch = rawFeedFetch();
-        FuelPricesStationDto stationDto = FuelPricesStationDto.builder().nodeId("missing-site").build();
+        FuelPricesStationDto stationDto = fuelPricesStation("missing-site", "B7", "1.529");
         NormalizedPriceObservation normalized = NormalizedPriceObservation.builder()
                 .siteId("missing-site")
                 .fuelType("B7")
@@ -101,9 +111,16 @@ class PriceObservationIngestionServiceTest {
         when(fuelPricesNormalizer.normalize(stationDto)).thenReturn(List.of(normalized));
         when(stationRepository.findByRetailerAndSiteId(retailer, "missing-site")).thenReturn(Optional.empty());
 
-        int inserted = priceObservationIngestionService.ingest(retailer, rawFeedFetch, List.of(stationDto));
+        FuelPriceProcessingSummary summary = priceObservationIngestionService.ingest(
+                retailer,
+                rawFeedFetch,
+                List.of(stationDto)
+        );
 
-        assertEquals(0, inserted);
+        assertEquals(0, summary.insertedCount());
+        assertEquals(0, summary.duplicateCount());
+        assertEquals(1, summary.missingStationCount());
+        assertEquals(1, summary.normalizedObservationCount());
         verify(priceObservationRepository, never()).save(any());
         verify(latestPriceProjectionService, never()).upsertFromObservation(any());
         verify(applicationEventPublisher, never()).publishEvent(any());
@@ -113,7 +130,7 @@ class PriceObservationIngestionServiceTest {
     void ingestSkipsDuplicateObservation() {
         RetailerEntity retailer = retailer();
         RawFeedFetchEntity rawFeedFetch = rawFeedFetch();
-        FuelPricesStationDto stationDto = FuelPricesStationDto.builder().nodeId("site-2").build();
+        FuelPricesStationDto stationDto = fuelPricesStation("site-2", "B7", "1.529");
         NormalizedPriceObservation normalized = NormalizedPriceObservation.builder()
                 .siteId("site-2")
                 .fuelType("B7")
@@ -125,12 +142,43 @@ class PriceObservationIngestionServiceTest {
         when(stationRepository.findByRetailerAndSiteId(retailer, "site-2")).thenReturn(Optional.of(station));
         when(priceObservationRepository.existsBySourceHash(any())).thenReturn(true);
 
-        int inserted = priceObservationIngestionService.ingest(retailer, rawFeedFetch, List.of(stationDto));
+        FuelPriceProcessingSummary summary = priceObservationIngestionService.ingest(
+                retailer,
+                rawFeedFetch,
+                List.of(stationDto)
+        );
 
-        assertEquals(0, inserted);
+        assertEquals(0, summary.insertedCount());
+        assertEquals(1, summary.duplicateCount());
+        assertEquals(0, summary.missingStationCount());
+        assertEquals(1, summary.normalizedObservationCount());
         verify(priceObservationRepository, never()).save(any());
         verify(latestPriceProjectionService, never()).upsertFromObservation(any());
         verify(applicationEventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void ingestCountsInvalidUnusableFuelPriceEntriesAsNormalizationSkips() {
+        RetailerEntity retailer = retailer();
+        RawFeedFetchEntity rawFeedFetch = rawFeedFetch();
+        FuelPricesStationDto stationDto = fuelPricesStation("site-3", "E10", "1.459");
+
+        when(fuelPricesNormalizer.normalize(stationDto)).thenReturn(List.of());
+
+        FuelPriceProcessingSummary summary = priceObservationIngestionService.ingest(
+                retailer,
+                rawFeedFetch,
+                List.of(stationDto)
+        );
+
+        assertEquals(1, summary.rawStationCount());
+        assertEquals(1, summary.rawFuelPriceEntryCount());
+        assertEquals(0, summary.normalizedObservationCount());
+        assertEquals(1, summary.skippedInvalidUnusableEntryCount());
+        assertEquals(0, summary.insertedCount());
+        assertEquals(0, summary.duplicateCount());
+        assertEquals(0, summary.missingStationCount());
+        verify(priceObservationRepository, never()).save(any());
     }
 
     @Test
@@ -155,6 +203,16 @@ class PriceObservationIngestionServiceTest {
     private static RawFeedFetchEntity rawFeedFetch() {
         return RawFeedFetchEntity.builder()
                 .id(UUID.randomUUID())
+                .build();
+    }
+
+    private static FuelPricesStationDto fuelPricesStation(String siteId, String fuelType, String price) {
+        return FuelPricesStationDto.builder()
+                .nodeId(siteId)
+                .fuelPrices(List.of(FuelPriceDto.builder()
+                        .fuelType(fuelType)
+                        .price(new BigDecimal(price))
+                        .build()))
                 .build();
     }
 

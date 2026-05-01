@@ -23,6 +23,11 @@ public class RawIngestionSummary {
     int fuelPricesRecordCount;
     UUID fuelPricesRawFeedFetchId;
 
+    ReconciliationStatus reconciliationStatus;
+    ReconciliationAction reconciliationAction;
+    boolean reconciliationShouldAbort;
+    String reconciliationMessage;
+
     public static RawIngestionSummary success(
             String retailerName,
             Instant startedAt,
@@ -31,7 +36,8 @@ public class RawIngestionSummary {
             UUID pfsRawFeedFetchId,
             int fuelPricesBatchNumber,
             int fuelPricesRecordCount,
-            UUID fuelPricesRawFeedFetchId
+            UUID fuelPricesRawFeedFetchId,
+            ReconciliationDecision reconciliationDecision
     ) {
         return RawIngestionSummary.builder()
                 .retailerName(retailerName)
@@ -44,6 +50,10 @@ public class RawIngestionSummary {
                 .fuelPricesBatchNumber(fuelPricesBatchNumber)
                 .fuelPricesRecordCount(fuelPricesRecordCount)
                 .fuelPricesRawFeedFetchId(fuelPricesRawFeedFetchId)
+                .reconciliationStatus(reconciliationDecision.status())
+                .reconciliationAction(reconciliationDecision.action())
+                .reconciliationShouldAbort(reconciliationDecision.shouldAbort())
+                .reconciliationMessage(reconciliationDecision.message())
                 .build();
     }
 
@@ -51,6 +61,15 @@ public class RawIngestionSummary {
             String retailerName,
             Instant startedAt,
             String reason
+    ) {
+        return failed(retailerName, startedAt, reason, null);
+    }
+
+    public static RawIngestionSummary failed(
+            String retailerName,
+            Instant startedAt,
+            String reason,
+            ReconciliationDecision reconciliationDecision
     ) {
         return RawIngestionSummary.builder()
                 .retailerName(retailerName)
@@ -63,6 +82,10 @@ public class RawIngestionSummary {
                 .fuelPricesBatchNumber(0)
                 .fuelPricesRecordCount(0)
                 .fuelPricesRawFeedFetchId(null)
+                .reconciliationStatus(reconciliationDecision == null ? null : reconciliationDecision.status())
+                .reconciliationAction(reconciliationDecision == null ? null : reconciliationDecision.action())
+                .reconciliationShouldAbort(reconciliationDecision != null && reconciliationDecision.shouldAbort())
+                .reconciliationMessage(reconciliationDecision == null ? null : reconciliationDecision.message())
                 .build();
     }
 }

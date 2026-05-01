@@ -66,6 +66,8 @@ fuelfinder:
       token-path: /oauth/generate_access_token
       refresh-path: /oauth/regenerate_access_token
   ingestion:
+    reconciliation:
+      unexplained-mismatch-action: fail
     scheduler:
       enabled: false
       cron: "0 */30 * * * *"
