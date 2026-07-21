@@ -27,6 +27,20 @@ From [`backend/`](.) on Windows PowerShell:
 .\gradlew.bat test
 ```
 
+```powershell
+.\gradlew.bat jacocoTestCoverageVerification
+```
+
+```powershell
+.\gradlew.bat bootJar
+```
+
+```powershell
+docker build -t fuel-finder-backend:local .
+```
+
+CI details are documented in the repository root [README.md](../README.md).
+
 ## Geospatial API
 
 Available station endpoints:
