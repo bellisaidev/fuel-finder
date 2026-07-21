@@ -70,6 +70,10 @@ dependencies {
 
 }
 
+tasks.named('bootJar') {
+    archiveFileName = 'app.jar'
+}
+
 jacoco {
     toolVersion = "0.8.12"
 }
