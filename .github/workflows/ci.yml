@@ -50,3 +50,6 @@ jobs:
 
       - name: Build Spring Boot JAR
         run: ./gradlew bootJar
+
+      - name: Build Docker image
+        run: docker build -t fuel-finder:ci .
