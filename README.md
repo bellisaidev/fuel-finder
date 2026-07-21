@@ -30,7 +30,6 @@ What is still in progress:
 
 - Additional read filters and query shapes beyond the current station endpoints
 - Broader integration coverage across more failure scenarios and ingestion edge cases
-- Cleanup or consolidation of alternative JDBC write paths that are not part of the active ingestion flow
 
 ## Tech Stack
 
@@ -59,7 +58,7 @@ Main areas:
 - `ingestion/raw/auth/`: Fuel Finder API properties, OAuth clients, token management
 - `ingestion/raw/client/`: external feed clients and DTOs
 - `ingestion/raw/orchestrator/`: ingestion coordination
-- `ingestion/raw/writer/`: raw payload storage plus experimental/alternative JDBC write helpers
+- `ingestion/raw/writer/`: raw payload storage
 - `ingestion/normalize/`: station normalization, price normalization, observation ingestion, and latest price projection
 - `api/station/`: station read endpoints for nearby, cheapest-nearby, map bounds, details, and price history lookups
 - `persistence/entity/`: JPA entities
@@ -423,7 +422,6 @@ Current test coverage includes:
 - unit tests for ingestion orchestration, station normalization, latest-price projection, price observation ingestion, utility logic, station query services, and custom exceptions
 - reconciliation tests for `OK`, `OK_WITH_SKIPS`, `FAILED + FAIL`, `FAILED + WARN`, normalization skips, duplicate observations, and missing-station persistence outcomes
 - cache-focused tests for normalized query keys, repeated-query cache hits, and after-commit cache invalidation behavior
-- integration tests for JDBC repository writes against PostgreSQL/PostGIS
 - integration tests for station details, in-bounds queries, price history, price history summaries, and cache invalidation
 - integration tests for end-to-end ingestion, repeated-ingestion deduplication flows, and station field persistence
 
@@ -462,7 +460,7 @@ Run only selected unit tests:
 Run only selected integration tests:
 
 ```bash
-./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.writer.JdbcRepositoriesIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.IngestionDedupeIT"
+./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.IngestionDedupeIT"
 ```
 
 Run all integration tests:
@@ -500,7 +498,6 @@ Near-term priorities:
 - extend read APIs with richer filters and query shapes
 - extend integration tests to cover more ingestion edge cases and failure paths
 - raise and enforce JaCoCo coverage thresholds over time
-- align or remove unused JDBC write paths
 - deepen observability beyond the current API request logging and ingestion diagnostics
 
 ## Why This Project
