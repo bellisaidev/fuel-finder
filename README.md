@@ -10,6 +10,8 @@ What is implemented today:
 
 - Spring Boot backend with Java 21
 - PostgreSQL + PostGIS local environment via Docker Compose
+- Backend Docker image build
+- GitHub Actions CI for tests, coverage verification, JAR build, and Docker build
 - Flyway database migrations
 - OAuth2 client credentials integration with the Fuel Finder API
 - Paginated retrieval of PFS and fuel price feeds
@@ -24,7 +26,7 @@ What is implemented today:
 - Station persistence enriched with `address`, `city`, `county`, `country`, and `postcode`
 - Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
 - Unit tests with JUnit 5 and Mockito across auth, client, normalization, exception, and ingestion orchestration components
-- Integration tests with Spring Boot Test and Testcontainers for JDBC persistence, end-to-end ingestion, deduplication, and station persistence flows
+- Integration tests with Spring Boot Test and Testcontainers for repository persistence, end-to-end ingestion, deduplication, cache invalidation, and station read flows
 
 What is still in progress:
 
@@ -44,9 +46,13 @@ What is still in progress:
 - PostGIS
 - Flyway
 - Caffeine
-- Docker Compose
+- Docker
+- GitHub Actions
 - Lombok
+- JUnit 5
+- Mockito
 - Testcontainers
+- JaCoCo
 
 ## Architecture
 
@@ -367,6 +373,22 @@ Station price history summary:
 http://localhost:8080/v1/stations/123e4567-e89b-12d3-a456-426614174000/price-history/summary?fuelType=E5&from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z&limit=30
 ```
 
+## Docker
+
+Build the backend image from the repository root:
+
+```bash
+docker build -f backend/Dockerfile backend -t fuel-finder-backend:local
+```
+
+Or from [`backend/`](backend):
+
+```bash
+docker build -t fuel-finder-backend:local .
+```
+
+The Docker image does not hard-code a Spring profile. Production deployments should explicitly set `SPRING_PROFILES_ACTIVE=prod` at runtime and provide the required database and Fuel Finder API configuration through environment variables/secrets.
+
 ## Configuration Notes
 
 - Base application settings live in [`backend/src/main/resources/application.yaml`](backend/src/main/resources/application.yaml)
@@ -412,6 +434,21 @@ Notes:
 - the station-details cache is also cleared after a successful transaction commit that changes station metadata
 - equivalent requests such as `fuelType=e5` and `fuelType=E5` reuse the same cache entry after normalization
 
+## CI
+
+GitHub Actions CI is defined in [ci.yml](.github/workflows/ci.yml).
+
+The workflow runs on push and pull requests targeting `master`, using the backend module as its working directory. It currently:
+
+- sets up Java 21 with Temurin
+- sets up Gradle caching
+- runs `./gradlew test`
+- runs `./gradlew jacocoTestCoverageVerification`
+- builds the Spring Boot JAR with `./gradlew bootJar`
+- builds the backend Docker image
+
+The test task includes integration tests matching `*IT`, so CI requires Docker for Testcontainers.
+
 ## Testing
 
 The backend includes unit and integration tests based on JUnit 5, Mockito, Spring Boot Test, Testcontainers, and JaCoCo coverage reporting.
@@ -435,6 +472,30 @@ On Windows PowerShell:
 
 ```powershell
 .\gradlew.bat test
+```
+
+Verify the configured JaCoCo coverage threshold:
+
+```bash
+./gradlew jacocoTestCoverageVerification
+```
+
+On Windows PowerShell:
+
+```powershell
+.\gradlew.bat jacocoTestCoverageVerification
+```
+
+Build the Spring Boot JAR:
+
+```bash
+./gradlew bootJar
+```
+
+On Windows PowerShell:
+
+```powershell
+.\gradlew.bat bootJar
 ```
 
 Generate the JaCoCo HTML coverage report:
@@ -475,7 +536,12 @@ Tests matching `*IT` run as part of the standard `test` task in this project. In
 
 ```text
 fuel-finder/
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml
 |-- backend/
+|   |-- .dockerignore
+|   |-- Dockerfile
 |   |-- build.gradle
 |   |-- gradlew
 |   |-- gradlew.bat
@@ -497,7 +563,8 @@ Near-term priorities:
 
 - extend read APIs with richer filters and query shapes
 - extend integration tests to cover more ingestion edge cases and failure paths
-- raise and enforce JaCoCo coverage thresholds over time
+- publish versioned Docker images to a registry and add deployment/promotion workflows
+- raise JaCoCo coverage thresholds over time
 - deepen observability beyond the current API request logging and ingestion diagnostics
 
 ## Why This Project
