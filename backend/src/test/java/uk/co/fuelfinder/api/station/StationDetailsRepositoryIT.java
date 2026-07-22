@@ -42,6 +42,8 @@ class StationDetailsRepositoryIT {
         registry.add("spring.datasource.username", POSTGIS::getUsername);
         registry.add("spring.datasource.password", POSTGIS::getPassword);
         registry.add("spring.flyway.enabled", () -> true);
+        registry.add("fuelfinder.api.oauth.client-id", () -> "test-client");
+        registry.add("fuelfinder.api.oauth.client-secret", () -> "test-secret");
     }
 
     @Autowired

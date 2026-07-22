@@ -1,8 +1,32 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
 fuelfinder:
   api:
     base-url: https://www.fuel-finder.service.gov.uk/api/v1
+    oauth:
+      client-id: ${FUEL_FINDER_CLIENT_ID:}
+      client-secret: ${FUEL_FINDER_CLIENT_SECRET:}
   ingestion:
     scheduler:
       enabled: true
       cron: "0 */30 * * * *"
       retailer-name: "FUEL_FINDER_API"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

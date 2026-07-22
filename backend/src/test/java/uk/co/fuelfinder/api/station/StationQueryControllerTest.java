@@ -36,7 +36,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(StationQueryController.class)
+@WebMvcTest(
+        value = StationQueryController.class,
+        properties = {
+                "fuelfinder.api.oauth.client-id=test-client",
+                "fuelfinder.api.oauth.client-secret=test-secret"
+        }
+)
 @Import({ApiExceptionHandler.class, StationQueryApiLoggingConfig.class})
 @ExtendWith(OutputCaptureExtension.class)
 class StationQueryControllerTest {
