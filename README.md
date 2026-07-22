@@ -389,6 +389,60 @@ docker build -t fuel-finder-backend:local .
 
 The Docker image does not hard-code a Spring profile. Production deployments should explicitly set `SPRING_PROFILES_ACTIVE=prod` at runtime and provide the required database and Fuel Finder API configuration through environment variables/secrets.
 
+## Production Runtime Configuration
+
+The Docker image is environment-agnostic: it does not set a Spring profile, so the same image can be promoted between environments. A production deployment must set `SPRING_PROFILES_ACTIVE=prod`. This is a deployment requirement rather than an `application-prod.yml` placeholder.
+
+The `prod` profile requires the following runtime configuration. The placeholders have no usable defaults.
+
+| Variable | Description |
+|---|---|
+| `FUEL_FINDER_CLIENT_ID` | OAuth2 client ID for the external Fuel Finder API. Must not be blank. |
+| `FUEL_FINDER_CLIENT_SECRET` | OAuth2 client secret for the external Fuel Finder API. Must not be blank. |
+| `SPRING_DATASOURCE_URL` | JDBC URL for the production PostgreSQL/PostGIS database. |
+| `SPRING_DATASOURCE_USERNAME` | Production database username. |
+| `SPRING_DATASOURCE_PASSWORD` | Production database password. |
+
+Missing required placeholders prevent production configuration from being resolved. Missing or blank OAuth credentials also fail configuration binding through Bean Validation, before ingestion or an external API client can start. Database settings are supplied through Spring Boot's standard datasource environment variables; no custom `DB_*` aliases are used.
+
+Secrets must be supplied by the deployment environment or its secret manager and must never be committed. Copy [`.env.prod.example`](.env.prod.example) to the ignored `.env.prod` file only for a local container exercise, then replace every placeholder:
+
+```bash
+cp .env.prod.example .env.prod
+```
+
+An equivalent container invocation is:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e SPRING_PROFILES_ACTIVE=prod \
+  -e FUEL_FINDER_CLIENT_ID='<client-id>' \
+  -e FUEL_FINDER_CLIENT_SECRET='<client-secret>' \
+  -e SPRING_DATASOURCE_URL='jdbc:postgresql://<database-host>:5432/<database-name>' \
+  -e SPRING_DATASOURCE_USERNAME='<database-user>' \
+  -e SPRING_DATASOURCE_PASSWORD='<database-password>' \
+  fuel-finder-backend:local
+```
+
+### Effective production defaults
+
+These values are explicitly defined by the current base and production YAML configuration:
+
+| Setting | Effective value in `prod` |
+|---|---|
+| Server port | `8080` |
+| Fuel Finder API base URL | `https://www.fuel-finder.service.gov.uk/api/v1` |
+| OAuth token path | `/oauth/generate_access_token` |
+| OAuth refresh path | `/oauth/regenerate_access_token` |
+| Ingestion scheduler | Enabled, every 30 minutes |
+| Ingestion retailer | `FUEL_FINDER_API` |
+| Actuator web exposure | `health,info` |
+| Health details | `never` |
+| OpenAPI API docs | Disabled |
+| Swagger UI | Disabled |
+
+There are currently no additional application-specific optional environment variables in the supported production contract.
+
 ## Configuration Notes
 
 - Base application settings live in [`backend/src/main/resources/application.yaml`](backend/src/main/resources/application.yaml)

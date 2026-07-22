@@ -41,6 +41,10 @@ docker build -t fuel-finder-backend:local .
 
 CI details are documented in the repository root [README.md](../README.md).
 
+## Production Configuration
+
+Production runtime requirements, mandatory environment variables, defaults, and secret-handling guidance are documented in the root [README.md](../README.md#production-runtime-configuration).
+
 ## Geospatial API
 
 Available station endpoints:
