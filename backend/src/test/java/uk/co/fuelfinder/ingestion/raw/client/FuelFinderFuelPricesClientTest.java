@@ -8,10 +8,14 @@ import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderInvalidResponseException;
+import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderApiProperties;
 import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderTokenProvider;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpExceptionMapper;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpResilience;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,7 +33,7 @@ class FuelFinderFuelPricesClientTest {
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
 
         AtomicReference<ClientRequest> capturedRequest = new AtomicReference<>();
-        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+        FuelFinderFuelPricesClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> {
                             capturedRequest.set(request);
@@ -67,7 +71,7 @@ class FuelFinderFuelPricesClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
 
-        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+        FuelFinderFuelPricesClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.OK, """
                                 [
@@ -92,7 +96,7 @@ class FuelFinderFuelPricesClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
 
-        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+        FuelFinderFuelPricesClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.OK, "[]"))
                         .build(),
@@ -107,7 +111,7 @@ class FuelFinderFuelPricesClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
 
-        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+        FuelFinderFuelPricesClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.NOT_FOUND, """
                                 {
@@ -130,7 +134,7 @@ class FuelFinderFuelPricesClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
 
-        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+        FuelFinderFuelPricesClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.OK).build()))
                         .build(),
@@ -147,7 +151,7 @@ class FuelFinderFuelPricesClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
 
-        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+        FuelFinderFuelPricesClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.INTERNAL_SERVER_ERROR, "{\"error\":\"down\"}"))
                         .build(),
@@ -156,7 +160,8 @@ class FuelFinderFuelPricesClientTest {
 
         assertThatThrownBy(() -> client.fetchFuelPrices(6))
                 .isInstanceOf(FuelFinderIntegrationException.class)
-                .hasMessageContaining("Unexpected error while fetching Fuel Finder fuel prices batch 6");
+                .hasMessageContaining("Fuel Finder fuel prices batch 6 request failed")
+                .hasMessageContaining("500 INTERNAL_SERVER_ERROR");
     }
 
     @Test
@@ -164,7 +169,7 @@ class FuelFinderFuelPricesClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-456");
 
-        FuelFinderFuelPricesClient client = new FuelFinderFuelPricesClient(
+        FuelFinderFuelPricesClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.OK, "[{"))
                         .build(),
@@ -173,7 +178,7 @@ class FuelFinderFuelPricesClientTest {
 
         assertThatThrownBy(() -> client.fetchFuelPrices(8))
                 .isInstanceOf(FuelFinderIntegrationException.class)
-                .hasMessageContaining("Unexpected error while fetching Fuel Finder fuel prices batch 8");
+                .hasMessageContaining("Fuel Finder fuel prices batch 8 request failed unexpectedly");
     }
 
     private static Mono<ClientResponse> jsonResponse(HttpStatus status, String body) {
@@ -181,5 +186,20 @@ class FuelFinderFuelPricesClientTest {
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .body(body)
                 .build());
+    }
+
+    private static FuelFinderFuelPricesClient newClient(
+            WebClient webClient,
+            FuelFinderTokenProvider tokenProvider
+    ) {
+        FuelFinderApiProperties properties = new FuelFinderApiProperties();
+        properties.getHttp().getRetry().setMaxRetries(0);
+        FuelFinderHttpResilience resilience = new FuelFinderHttpResilience(properties);
+        return new FuelFinderFuelPricesClient(
+                webClient,
+                tokenProvider,
+                resilience,
+                new FuelFinderHttpExceptionMapper(resilience, new ObjectMapper())
+        );
     }
 }

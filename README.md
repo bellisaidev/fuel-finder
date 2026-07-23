@@ -98,6 +98,12 @@ flowchart TD
     L --> Q
 ```
 
+### Fuel Finder HTTP resilience
+
+The authenticated Fuel Finder clients share one bounded Reactor Netty connection pool and use explicit connection and response timeouts. Transient connection failures, timeouts, HTTP 408/429, and selected 5xx responses are retried up to two times with exponential backoff and jitter. Valid `Retry-After` values on 429 and 503 responses are honored as minimum delays up to a separate 30-second operational limit.
+
+The current values are initial operational defaults and are externally configurable under `fuelfinder.api.http`. With three attempts, a 20-second response timeout, and two permitted 30-second `Retry-After` delays, one logical request can approach roughly two minutes. This budget, along with pool sizing and retry limits, should be revisited using ingestion-duration metrics and representative load testing.
+
 ## Data Model
 
 Core tables currently defined through Flyway:

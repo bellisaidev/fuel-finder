@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.Locale;
 import java.util.Objects;
+import java.time.Duration;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,7 +42,55 @@ class FuelFinderApiPropertiesTest {
                     assertThat(properties.getOauth().getTokenPath()).isEqualTo("/oauth/token");
                     assertThat(properties.getOauth().getClientId()).isEqualTo("test-client");
                     assertThat(properties.getOauth().getClientSecret()).isEqualTo("test-secret");
+                    assertThat(properties.getHttp().getConnectTimeout()).isEqualTo(Duration.ofSeconds(5));
+                    assertThat(properties.getHttp().getResponseTimeout()).isEqualTo(Duration.ofSeconds(20));
+                    assertThat(properties.getHttp().getPool().getMaxConnections()).isEqualTo(20);
+                    assertThat(properties.getHttp().getRetry().getMaxRetries()).isEqualTo(2);
+                    assertThat(properties.getHttp().getRetry().getMaxRetryAfter()).isEqualTo(Duration.ofSeconds(30));
                 });
+    }
+
+    @Test
+    void bindsHttpResilienceOverrides() {
+        contextRunner
+                .withPropertyValues(
+                        BASE_URL,
+                        TOKEN_PATH,
+                        CLIENT_ID,
+                        CLIENT_SECRET,
+                        "fuelfinder.api.http.connect-timeout=2s",
+                        "fuelfinder.api.http.response-timeout=9s",
+                        "fuelfinder.api.http.pool.max-connections=7",
+                        "fuelfinder.api.http.retry.max-retries=1",
+                        "fuelfinder.api.http.retry.initial-backoff=100ms",
+                        "fuelfinder.api.http.retry.max-backoff=2s",
+                        "fuelfinder.api.http.retry.jitter=0.25",
+                        "fuelfinder.api.http.retry.max-retry-after=12s")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    FuelFinderApiProperties.Http http = context.getBean(FuelFinderApiProperties.class).getHttp();
+                    assertThat(http.getConnectTimeout()).isEqualTo(Duration.ofSeconds(2));
+                    assertThat(http.getResponseTimeout()).isEqualTo(Duration.ofSeconds(9));
+                    assertThat(http.getPool().getMaxConnections()).isEqualTo(7);
+                    assertThat(http.getRetry().getMaxRetries()).isEqualTo(1);
+                    assertThat(http.getRetry().getInitialBackoff()).isEqualTo(Duration.ofMillis(100));
+                    assertThat(http.getRetry().getJitter()).isEqualTo(0.25);
+                    assertThat(http.getRetry().getMaxRetryAfter()).isEqualTo(Duration.ofSeconds(12));
+                });
+    }
+
+    @Test
+    void rejectsInvalidHttpResilienceConfiguration() {
+        contextRunner
+                .withPropertyValues(
+                        BASE_URL,
+                        TOKEN_PATH,
+                        CLIENT_ID,
+                        CLIENT_SECRET,
+                        "fuelfinder.api.http.response-timeout=0s",
+                        "fuelfinder.api.http.pool.max-connections=0",
+                        "fuelfinder.api.http.retry.jitter=1.1")
+                .run(context -> assertThat(context.getStartupFailure()).isNotNull());
     }
 
     @Test
