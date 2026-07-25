@@ -9,7 +9,7 @@ This file is intentionally short and focused on backend-specific quick reference
 - `local`: normal local development profile, scheduler enabled
 - `local-manual`: manual ingestion profile, scheduler disabled, `IngestionRunner` executes once on startup
 - `prod`: production-oriented settings
-- `test`: lightweight test profile used by `BackendApplicationTests`
+- `test`: lightweight profile used by Spring context tests that do not need the normal datasource/JPA/Flyway auto-configuration
 
 ## Useful Commands
 
@@ -27,7 +27,10 @@ From [`backend/`](.) on Windows PowerShell:
 .\gradlew.bat test
 ```
 
+From a clean checkout, execute the tests before coverage verification:
+
 ```powershell
+.\gradlew.bat test
 .\gradlew.bat jacocoTestCoverageVerification
 ```
 
@@ -44,6 +47,46 @@ CI details are documented in the repository root [README.md](../README.md).
 ## Production Configuration
 
 Production runtime requirements, mandatory environment variables, defaults, and secret-handling guidance are documented in the root [README.md](../README.md#production-runtime-configuration).
+
+## HTTP Resilience
+
+The OAuth and Fuel Finder API clients share a bounded Reactor Netty connection pool. Runtime defaults under `fuelfinder.api.http` provide:
+
+- `5s` connection and `20s` response timeouts
+- a maximum of `20` pooled connections and `40` pending acquisitions
+- up to `2` retries with exponential backoff and jitter
+- bounded `Retry-After` handling for HTTP 429 and 503
+- distinct connectivity, authentication, HTTP integration, and unexpected-failure mapping
+
+These defaults can be overridden through Spring configuration or the optional environment variables documented in [Fuel Finder HTTP resilience](../README.md#fuel-finder-http-resilience) and [Production Runtime Configuration](../README.md#optional-http-resilience-overrides).
+
+## Actuator and Observability
+
+The base and production configurations expose:
+
+- `/actuator/health`
+- `/actuator/info`
+- `/actuator/prometheus`
+
+The Prometheus endpoint is intended for private monitoring access and must not be published as a public application endpoint.
+
+From the repository root, start the optional local monitoring services while keeping the default Compose workflow database-only:
+
+```powershell
+docker compose --profile observability up -d
+```
+
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+- Dashboard: **Fuel Finder / Fuel Finder Overview**
+
+Stop only Prometheus and Grafana, leaving PostgreSQL running:
+
+```powershell
+docker compose --profile observability stop prometheus grafana
+```
+
+See [Metrics and Local Observability](../README.md#metrics-and-local-observability) for the custom meter catalogue, framework-provided metrics, dashboard scope, and timestamp semantics.
 
 ## Geospatial API
 
@@ -135,8 +178,14 @@ Accepted values are `fail` and `warn`. In `warn` mode, a failed reconciliation s
 
 ## Integration Tests
 
-Run all integration tests from [`backend/`](.):
+Run tests that follow the `*IT` naming convention from [`backend/`](.):
 
 ```powershell
 .\gradlew.bat test --tests "*IT"
+```
+
+This does not select integration-style classes named `*IntegrationTest`. Run the regular task for the complete suite:
+
+```powershell
+.\gradlew.bat test
 ```
