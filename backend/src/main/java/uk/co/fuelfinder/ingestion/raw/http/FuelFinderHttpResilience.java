@@ -2,6 +2,7 @@ package uk.co.fuelfinder.ingestion.raw.http;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -34,6 +35,7 @@ public class FuelFinderHttpResilience {
     private final Clock clock;
     private final DoubleSupplier jitterSource;
 
+    @Autowired
     public FuelFinderHttpResilience(FuelFinderApiProperties properties) {
         this(properties, Clock.systemUTC(), () -> ThreadLocalRandom.current().nextDouble());
     }
