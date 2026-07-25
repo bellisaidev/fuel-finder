@@ -6,9 +6,6 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
-import uk.co.fuelfinder.persistence.entity.RetailerEntity;
-import uk.co.fuelfinder.persistence.repository.RetailerRepository;
 
 @Slf4j
 @Component
@@ -17,8 +14,7 @@ import uk.co.fuelfinder.persistence.repository.RetailerRepository;
 public class IngestionScheduler {
 
     private final IngestionSchedulerProperties schedulerProperties;
-    private final RetailerRepository retailerRepository;
-    private final RetailerIngestionService retailerIngestionService;
+    private final InstrumentedIngestionExecutor ingestionExecutor;
 
     @Scheduled(cron = "${fuelfinder.ingestion.scheduler.cron:0 */30 * * * *}")
     @SchedulerLock(
@@ -35,12 +31,7 @@ public class IngestionScheduler {
         String retailerName = schedulerProperties.getRetailerName();
         log.info("Starting scheduled ingestion for retailer={}", retailerName);
 
-        RetailerEntity retailer = retailerRepository.findByName(retailerName)
-                .orElseThrow(() -> new FuelFinderIntegrationException(
-                        "Retailer not found for scheduled ingestion: " + retailerName
-                ));
-
-        RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+        RawIngestionSummary summary = ingestionExecutor.execute(retailerName);
 
         log.info(
                 "Scheduled ingestion completed: success={}, retailer={}, pfsRecordCount={}, fuelPricesRecordCount={}, failureReason={}",

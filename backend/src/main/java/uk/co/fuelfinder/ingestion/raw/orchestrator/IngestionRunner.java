@@ -7,8 +7,6 @@ import org.springframework.stereotype.Component;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderAuthenticationException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderConnectivityException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
-import uk.co.fuelfinder.persistence.entity.RetailerEntity;
-import uk.co.fuelfinder.persistence.repository.RetailerRepository;
 
 @Slf4j
 @Component
@@ -17,26 +15,16 @@ public class IngestionRunner implements CommandLineRunner {
 
     private static final String FUEL_FINDER_RETAILER_NAME = "FUEL_FINDER_API";
 
-    private final RetailerRepository retailerRepository;
-    private final RetailerIngestionService retailerIngestionService;
+    private final InstrumentedIngestionExecutor ingestionExecutor;
 
-    public IngestionRunner(
-            RetailerRepository retailerRepository,
-            RetailerIngestionService retailerIngestionService
-    ) {
-        this.retailerRepository = retailerRepository;
-        this.retailerIngestionService = retailerIngestionService;
+    public IngestionRunner(InstrumentedIngestionExecutor ingestionExecutor) {
+        this.ingestionExecutor = ingestionExecutor;
     }
 
     @Override
     public void run(String... args) {
         try {
-            RetailerEntity retailer = retailerRepository.findByName(FUEL_FINDER_RETAILER_NAME)
-                    .orElseThrow(() -> new FuelFinderIntegrationException(
-                            "Retailer not found: " + FUEL_FINDER_RETAILER_NAME
-                    ));
-
-            RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
+            RawIngestionSummary summary = ingestionExecutor.execute(FUEL_FINDER_RETAILER_NAME);
 
             log.info(
                     "Raw ingestion finished: success={}, retailer={}, pfsBatchNumber={}, pfsRecordCount={}, pfsRawFeedFetchId={}, fuelPricesBatchNumber={}, fuelPricesRecordCount={}, fuelPricesRawFeedFetchId={}, failureReason={}",

@@ -45,6 +45,8 @@ public class RetailerIngestionService {
     public RawIngestionSummary ingest(RetailerEntity retailer) {
         Instant startedAt = Instant.now();
         String retailerName = retailer.getName();
+        int processedStationCount = 0;
+        int processedPriceCount = 0;
 
         log.info("Starting ingestion for retailer={}", retailerName);
 
@@ -62,6 +64,7 @@ public class RetailerIngestionService {
             );
 
             PfsStationProcessingSummary pfsProcessingSummary = normalizeAndUpsertStations(retailer, pfsStations);
+            processedStationCount = pfsProcessingSummary.normalizedStationCount();
             log.info(
                     "Station normalization completed for retailer={}: rawStationCount={}, normalizedStationCount={}, skippedCount={}, skippedMissingSiteIdCount={}, stationUpserts={}",
                     retailerName,
@@ -89,6 +92,7 @@ public class RetailerIngestionService {
                     fuelPricesRawFeed,
                     new ArrayList<>(fuelPricesStations)
             );
+            processedPriceCount = fuelPriceProcessingSummary.normalizedObservationCount();
             ReconciliationDecision reconciliationDecision = ReconciliationDecision.evaluate(
                     pfsProcessingSummary,
                     fuelPriceProcessingSummary,
@@ -112,6 +116,8 @@ public class RetailerIngestionService {
             RawIngestionSummary summary = RawIngestionSummary.success(
                     retailerName,
                     startedAt,
+                    processedStationCount,
+                    processedPriceCount,
                     DEFAULT_BATCH_NUMBER,
                     pfsStations.size(),
                     pfsRawFeed.getId(),
@@ -144,6 +150,8 @@ public class RetailerIngestionService {
                     retailerName,
                     startedAt,
                     e.getMessage() == null ? "Unknown reconciliation error" : e.getMessage(),
+                    processedStationCount,
+                    processedPriceCount,
                     e.getDecision()
             );
         } catch (Exception e) {
@@ -152,7 +160,10 @@ public class RetailerIngestionService {
             return RawIngestionSummary.failed(
                     retailerName,
                     startedAt,
-                    e.getMessage() == null ? "Unknown ingestion error" : e.getMessage()
+                    e.getMessage() == null ? "Unknown ingestion error" : e.getMessage(),
+                    processedStationCount,
+                    processedPriceCount,
+                    null
             );
         }
     }

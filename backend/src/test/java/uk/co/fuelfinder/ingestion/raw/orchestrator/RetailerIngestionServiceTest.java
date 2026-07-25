@@ -115,6 +115,8 @@ class RetailerIngestionServiceTest {
         assertEquals("Shell", summary.getRetailerName());
         assertEquals(501, summary.getPfsRecordCount());
         assertEquals(501, summary.getFuelPricesRecordCount());
+        assertEquals(501, summary.getProcessedStationCount());
+        assertEquals(501, summary.getProcessedPriceCount());
         assertEquals(pfsRawFeed.getId(), summary.getPfsRawFeedFetchId());
         assertEquals(fuelPricesRawFeed.getId(), summary.getFuelPricesRawFeedFetchId());
         assertEquals(1, summary.getPfsBatchNumber());
@@ -206,6 +208,8 @@ class RetailerIngestionServiceTest {
         assertEquals("PFS down", summary.getFailureReason());
         assertEquals(0, summary.getPfsRecordCount());
         assertEquals(0, summary.getFuelPricesRecordCount());
+        assertEquals(0, summary.getProcessedStationCount());
+        assertEquals(0, summary.getProcessedPriceCount());
 
         verify(rawFeedStorageService, never()).store(any(), any(), any(), any(Integer.class), any(), any(Integer.class));
         verify(priceObservationIngestionService, never()).ingest(any(), any(), any());
@@ -316,6 +320,8 @@ class RetailerIngestionServiceTest {
 
         assertTrue(summary.isSuccess());
         assertEquals(2, summary.getPfsRecordCount());
+        assertEquals(1, summary.getProcessedStationCount());
+        assertEquals(1, summary.getProcessedPriceCount());
         assertEquals(ReconciliationStatus.OK_WITH_SKIPS, summary.getReconciliationStatus());
         verify(stationUpsertService).upsert(retailer, validNormalizedStation);
         verify(stationUpsertService, never()).upsert(retailer, invalidNormalizedStation);
@@ -346,6 +352,8 @@ class RetailerIngestionServiceTest {
         RawIngestionSummary summary = retailerIngestionService.ingest(retailer);
 
         assertFalse(summary.isSuccess());
+        assertEquals(1, summary.getProcessedStationCount());
+        assertEquals(1, summary.getProcessedPriceCount());
         assertEquals(ReconciliationStatus.FAILED, summary.getReconciliationStatus());
         assertEquals(ReconciliationAction.FAIL, summary.getReconciliationAction());
         assertTrue(summary.isReconciliationShouldAbort());
@@ -403,6 +411,8 @@ class RetailerIngestionServiceTest {
         assertFalse(summary.isSuccess());
         assertEquals("Esso", summary.getRetailerName());
         assertEquals("Fuel prices down", summary.getFailureReason());
+        assertEquals(1, summary.getProcessedStationCount());
+        assertEquals(0, summary.getProcessedPriceCount());
         assertEquals(0, summary.getPfsRecordCount());
         assertEquals(0, summary.getFuelPricesRecordCount());
 
@@ -461,6 +471,8 @@ class RetailerIngestionServiceTest {
         assertFalse(summary.isSuccess());
         assertEquals("Jet", summary.getRetailerName());
         assertEquals("Backfill failed", summary.getFailureReason());
+        assertEquals(1, summary.getProcessedStationCount());
+        assertEquals(1, summary.getProcessedPriceCount());
 
         verify(priceObservationIngestionService).ingest(eq(retailer), eq(fuelPricesRawFeed), any(ArrayList.class));
         verify(latestPriceProjectionService).backfillIfEmpty();
