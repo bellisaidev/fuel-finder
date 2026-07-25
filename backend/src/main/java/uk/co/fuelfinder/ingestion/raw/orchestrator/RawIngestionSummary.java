@@ -15,6 +15,9 @@ public class RawIngestionSummary {
     boolean success;
     String failureReason;
 
+    int processedStationCount;
+    int processedPriceCount;
+
     int pfsBatchNumber;
     int pfsRecordCount;
     UUID pfsRawFeedFetchId;
@@ -31,6 +34,8 @@ public class RawIngestionSummary {
     public static RawIngestionSummary success(
             String retailerName,
             Instant startedAt,
+            int processedStationCount,
+            int processedPriceCount,
             int pfsBatchNumber,
             int pfsRecordCount,
             UUID pfsRawFeedFetchId,
@@ -44,6 +49,8 @@ public class RawIngestionSummary {
                 .startedAt(startedAt)
                 .success(true)
                 .failureReason(null)
+                .processedStationCount(processedStationCount)
+                .processedPriceCount(processedPriceCount)
                 .pfsBatchNumber(pfsBatchNumber)
                 .pfsRecordCount(pfsRecordCount)
                 .pfsRawFeedFetchId(pfsRawFeedFetchId)
@@ -62,7 +69,7 @@ public class RawIngestionSummary {
             Instant startedAt,
             String reason
     ) {
-        return failed(retailerName, startedAt, reason, null);
+        return failed(retailerName, startedAt, reason, 0, 0, null);
     }
 
     public static RawIngestionSummary failed(
@@ -71,11 +78,24 @@ public class RawIngestionSummary {
             String reason,
             ReconciliationDecision reconciliationDecision
     ) {
+        return failed(retailerName, startedAt, reason, 0, 0, reconciliationDecision);
+    }
+
+    public static RawIngestionSummary failed(
+            String retailerName,
+            Instant startedAt,
+            String reason,
+            int processedStationCount,
+            int processedPriceCount,
+            ReconciliationDecision reconciliationDecision
+    ) {
         return RawIngestionSummary.builder()
                 .retailerName(retailerName)
                 .startedAt(startedAt)
                 .success(false)
                 .failureReason(reason)
+                .processedStationCount(processedStationCount)
+                .processedPriceCount(processedPriceCount)
                 .pfsBatchNumber(0)
                 .pfsRecordCount(0)
                 .pfsRawFeedFetchId(null)

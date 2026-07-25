@@ -37,6 +37,7 @@ public class StationQueryCacheConfig {
         return new CaffeineCache(cacheName, Caffeine.newBuilder()
                 .expireAfterWrite(spec.ttl())
                 .maximumSize(spec.maxSize())
+                .recordStats()
                 .build());
     }
 }

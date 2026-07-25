@@ -2,7 +2,7 @@
 
 Fuel Finder is a backend Java/Spring Boot project for ingesting and storing data from the UK Fuel Finder Scheme.
 
-The repository now covers both the ingestion pipeline and an initial geospatial read API: OAuth authentication, paginated feed retrieval, raw payload storage, station normalization, PostgreSQL/PostGIS persistence, and public station lookup endpoints.
+The repository covers the ingestion pipeline and a geospatial read API, with production-oriented HTTP resilience and metrics: OAuth authentication, paginated feed retrieval, raw payload storage, station normalization, PostgreSQL/PostGIS persistence, public station lookup endpoints, bounded/retried upstream HTTP access, and Prometheus/Grafana observability.
 
 ## Current Status
 
@@ -10,10 +10,12 @@ What is implemented today:
 
 - Spring Boot backend with Java 21
 - PostgreSQL + PostGIS local environment via Docker Compose
+- Optional Prometheus and Grafana local observability stack
 - Backend Docker image build
 - GitHub Actions CI for tests, coverage verification, JAR build, and Docker build
 - Flyway database migrations
 - OAuth2 client credentials integration with the Fuel Finder API
+- Shared bounded Reactor Netty transport with configurable connection pooling, timeouts, retry/backoff, `Retry-After` handling, and centralized failure mapping
 - Paginated retrieval of PFS and fuel price feeds
 - Raw feed persistence for auditability
 - Station normalization and upsert flow
@@ -23,6 +25,9 @@ What is implemented today:
 - Local Caffeine caching for repeated geospatial read queries with transaction-safe invalidation after latest-price updates
 - Global API error handling for invalid query parameters
 - Lightweight operational logging for public station queries with success timing/result counts and consistent `400` warnings
+- Spring Boot Actuator and Micrometer metrics for HTTP, JVM, process, datasource/HikariCP, managed WebClient, and Caffeine caches
+- Low-cardinality ingestion outcome, duration, reconciliation, processed-count, and freshness metrics
+- Prometheus scrape export with a provisioned local Grafana datasource and Fuel Finder dashboard
 - Station persistence enriched with `address`, `city`, `county`, `country`, and `postcode`
 - Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
 - Unit tests with JUnit 5 and Mockito across auth, client, normalization, exception, and ingestion orchestration components
@@ -41,11 +46,15 @@ What is still in progress:
 - Spring WebFlux `WebClient`
 - Spring Data JPA
 - Spring Cache
+- Spring Boot Actuator
+- Micrometer
 - Hibernate Spatial
 - PostgreSQL
 - PostGIS
 - Flyway
 - Caffeine
+- Prometheus
+- Grafana
 - Docker
 - GitHub Actions
 - Lombok
@@ -63,12 +72,14 @@ Main areas:
 - `config/`: Spring configuration, WebClient setup, and cache configuration/properties
 - `ingestion/raw/auth/`: Fuel Finder API properties, OAuth clients, token management
 - `ingestion/raw/client/`: external feed clients and DTOs
+- `ingestion/raw/http/`: retry policy, `Retry-After` handling, and HTTP failure classification
 - `ingestion/raw/orchestrator/`: ingestion coordination
 - `ingestion/raw/writer/`: raw payload storage
 - `ingestion/normalize/`: station normalization, price normalization, observation ingestion, and latest price projection
 - `api/station/`: station read endpoints for nearby, cheapest-nearby, map bounds, details, and price history lookups
 - `persistence/entity/`: JPA entities
 - `persistence/repository/`: Spring Data repositories
+- `observability/`: low-cardinality ingestion meters and their clock configuration
 
 ### High-Level Flow
 
@@ -100,7 +111,7 @@ flowchart TD
 
 ### Fuel Finder HTTP resilience
 
-The authenticated Fuel Finder clients share one bounded Reactor Netty connection pool and use explicit connection and response timeouts. Transient connection failures, timeouts, HTTP 408/429, and selected 5xx responses are retried up to two times with exponential backoff and jitter. Valid `Retry-After` values on 429 and 503 responses are honored as minimum delays up to a separate 30-second operational limit.
+The OAuth and authenticated Fuel Finder clients share one bounded Reactor Netty connection pool and use explicit connection and response timeouts. Transient connection failures, timeouts, HTTP 408/429, and HTTP 500/502/503/504 responses are retried up to two times with exponential backoff and jitter. Valid `Retry-After` values on 429 and 503 responses are honored as minimum delays up to a separate 30-second operational limit. Exhausted connectivity failures, authentication failures, other HTTP failures, and unexpected integration failures are mapped into distinct application exceptions.
 
 The current values are initial operational defaults and are externally configurable under `fuelfinder.api.http`. With three attempts, a 20-second response timeout, and two permitted 30-second `Retry-After` delays, one logical request can approach roughly two minutes. This budget, along with pool sizing and retry limits, should be revisited using ingestion-duration metrics and representative load testing.
 
@@ -355,6 +366,34 @@ Health endpoint:
 http://localhost:8080/actuator/health
 ```
 
+Prometheus scrape endpoint:
+
+```text
+http://localhost:8080/actuator/prometheus
+```
+
+### 7. Optional: start Prometheus and Grafana
+
+The default Compose workflow remains database-only. With the backend running on the host, start the optional observability services with:
+
+```bash
+docker compose --profile observability up -d
+```
+
+Local endpoints:
+
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+- Grafana dashboard: **Fuel Finder / Fuel Finder Overview**
+
+Grafana uses `admin` / `admin` for local development unless `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` are set. Prometheus scrapes the host-run backend at `host.docker.internal:8080`.
+
+Stop only the optional monitoring services, leaving PostgreSQL running:
+
+```bash
+docker compose --profile observability stop prometheus grafana
+```
+
 Nearby stations:
 
 ```text
@@ -442,12 +481,32 @@ These values are explicitly defined by the current base and production YAML conf
 | OAuth refresh path | `/oauth/regenerate_access_token` |
 | Ingestion scheduler | Enabled, every 30 minutes |
 | Ingestion retailer | `FUEL_FINDER_API` |
-| Actuator web exposure | `health,info` |
+| Actuator web exposure | `health,info,prometheus` |
 | Health details | `never` |
 | OpenAPI API docs | Disabled |
 | Swagger UI | Disabled |
 
-There are currently no additional application-specific optional environment variables in the supported production contract.
+### Optional HTTP resilience overrides
+
+The production values under `fuelfinder.api.http` are operational defaults, not mandatory environment variables. Spring Boot relaxed binding allows individual settings to be overridden when deployment conditions require tuning:
+
+| Property | Environment variable | Default |
+|---|---|---|
+| `fuelfinder.api.http.connect-timeout` | `FUELFINDER_API_HTTP_CONNECT_TIMEOUT` | `5s` |
+| `fuelfinder.api.http.response-timeout` | `FUELFINDER_API_HTTP_RESPONSE_TIMEOUT` | `20s` |
+| `fuelfinder.api.http.pool.max-connections` | `FUELFINDER_API_HTTP_POOL_MAX_CONNECTIONS` | `20` |
+| `fuelfinder.api.http.pool.pending-acquire-max-count` | `FUELFINDER_API_HTTP_POOL_PENDING_ACQUIRE_MAX_COUNT` | `40` |
+| `fuelfinder.api.http.pool.pending-acquire-timeout` | `FUELFINDER_API_HTTP_POOL_PENDING_ACQUIRE_TIMEOUT` | `5s` |
+| `fuelfinder.api.http.pool.max-idle-time` | `FUELFINDER_API_HTTP_POOL_MAX_IDLE_TIME` | `30s` |
+| `fuelfinder.api.http.pool.max-life-time` | `FUELFINDER_API_HTTP_POOL_MAX_LIFE_TIME` | `5m` |
+| `fuelfinder.api.http.pool.eviction-interval` | `FUELFINDER_API_HTTP_POOL_EVICTION_INTERVAL` | `30s` |
+| `fuelfinder.api.http.retry.max-retries` | `FUELFINDER_API_HTTP_RETRY_MAX_RETRIES` | `2` |
+| `fuelfinder.api.http.retry.initial-backoff` | `FUELFINDER_API_HTTP_RETRY_INITIAL_BACKOFF` | `500ms` |
+| `fuelfinder.api.http.retry.max-backoff` | `FUELFINDER_API_HTTP_RETRY_MAX_BACKOFF` | `5s` |
+| `fuelfinder.api.http.retry.jitter` | `FUELFINDER_API_HTTP_RETRY_JITTER` | `0.5` |
+| `fuelfinder.api.http.retry.max-retry-after` | `FUELFINDER_API_HTTP_RETRY_MAX_RETRY_AFTER` | `30s` |
+
+Only override these settings with an explicit operational reason and validate the resulting worst-case request and ingestion duration.
 
 ## Configuration Notes
 
@@ -493,6 +552,64 @@ Notes:
 - history-cache entries are cleared after a successful transaction commit that changes `price_observation`
 - the station-details cache is also cleared after a successful transaction commit that changes station metadata
 - equivalent requests such as `fuelType=e5` and `fuelType=E5` reuse the same cache entry after normalization
+- Caffeine statistics are enabled and exported through Spring Boot's built-in `cache.*` metrics
+
+### Metrics and Local Observability
+
+Adding the Prometheus Micrometer registry makes metrics available at:
+
+```text
+/actuator/prometheus
+```
+
+This endpoint must be reachable by Prometheus or equivalent monitoring infrastructure, but it must not be exposed as a public application endpoint. Restrict it through deployment networking, firewall rules, a private management route, or reverse-proxy access policy.
+
+Fuel Finder custom meters use bounded tags only:
+
+| Java meter | Type | Tags | Meaning |
+|---|---|---|---|
+| `fuelfinder.ingestion.duration` | Timer | `outcome=success\|failure` | Complete ingestion execution duration; the Timer count is also the run count |
+| `fuelfinder.ingestion.reconciliation` | Counter | `status=ok\|ok_with_skips\|failed` | Reconciliation outcomes |
+| `fuelfinder.ingestion.stations.processed` | Counter | none | Accepted and normalized station records |
+| `fuelfinder.ingestion.prices.processed` | Counter | none | Accepted and normalized price observations |
+| `fuelfinder.ingestion.last.attempt.timestamp` | Gauge (epoch seconds) | none | Last attempt start |
+| `fuelfinder.ingestion.last.success.timestamp` | Gauge (epoch seconds) | none | Last successful completion |
+
+The timestamp gauges start at `0` after each application start. A zero value means **not observed since process start**, not Unix epoch freshness. The provisioned Grafana dashboard filters zero values before calculating age and displays “Not observed since process start” instead.
+
+The Prometheus endpoint also exports Spring Boot/Micrometer metrics instead of duplicating them with custom Fuel Finder meters:
+
+- `http.server.requests` for API request rate, error rate, and average latency
+- `jvm.*` for JVM memory
+- `process.*` for process CPU, start time, and uptime
+- `jdbc.connections.*` and `hikaricp.*` for the datasource pool
+- `http.client.requests` for managed Fuel Finder WebClient requests
+- `cache.*` for Caffeine cache statistics
+
+The currently provisioned **Fuel Finder Overview** dashboard visualizes:
+
+- ingestion completions split by outcome, average duration, and recent/time-window maximum duration
+- reconciliation outcomes and time since the last successful ingestion
+- Spring MVC API request rate, 4xx/5xx error rate, and average latency
+- JVM heap usage
+- HikariCP active, idle, pending, and maximum connections
+
+Processed station/price counters, process metrics, generic JDBC pool metrics, managed WebClient metrics, and Caffeine metrics are available through Prometheus but are not currently shown on the dashboard.
+
+The dashboard panel titled **Recent/time-window maximum ingestion duration** uses Micrometer Timer max. This is a decaying time-window maximum, not an all-time maximum.
+
+The observability files are under [`observability/`](observability). The profile is intentionally optional:
+
+```bash
+# Database only
+docker compose up -d
+
+# Database, Prometheus, and Grafana
+docker compose --profile observability up -d
+
+# Stop Prometheus and Grafana without stopping PostgreSQL
+docker compose --profile observability stop prometheus grafana
+```
 
 ## CI
 
@@ -516,7 +633,9 @@ The backend includes unit and integration tests based on JUnit 5, Mockito, Sprin
 Current test coverage includes:
 
 - unit tests for OAuth token retrieval and Fuel Finder API clients
+- HTTP resilience tests for retryable and non-retryable failures, exponential backoff/jitter, `Retry-After`, timeout/pool property validation, failure mapping, and Spring component wiring
 - unit tests for ingestion orchestration, station normalization, latest-price projection, price observation ingestion, utility logic, station query services, and custom exceptions
+- unit tests for the instrumented ingestion execution boundary and custom ingestion metrics, including bounded tags, durations, processed counts, outcomes, and timestamps
 - reconciliation tests for `OK`, `OK_WITH_SKIPS`, `FAILED + FAIL`, `FAILED + WARN`, normalization skips, duplicate observations, and missing-station persistence outcomes
 - cache-focused tests for normalized query keys, repeated-query cache hits, and after-commit cache invalidation behavior
 - integration tests for station details, in-bounds queries, price history, price history summaries, and cache invalidation
@@ -534,15 +653,17 @@ On Windows PowerShell:
 .\gradlew.bat test
 ```
 
-Verify the configured JaCoCo coverage threshold:
+From a clean checkout, run the tests before verifying the configured JaCoCo coverage threshold:
 
 ```bash
+./gradlew test
 ./gradlew jacocoTestCoverageVerification
 ```
 
 On Windows PowerShell:
 
 ```powershell
+.\gradlew.bat test
 .\gradlew.bat jacocoTestCoverageVerification
 ```
 
@@ -584,13 +705,13 @@ Run only selected integration tests:
 ./gradlew test --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.RetailerIngestionServiceIT" --tests "uk.co.fuelfinder.ingestion.raw.orchestrator.IngestionDedupeIT"
 ```
 
-Run all integration tests:
+Run tests that follow the `*IT` naming convention:
 
 ```bash
 ./gradlew test --tests "*IT"
 ```
 
-Tests matching `*IT` run as part of the standard `test` task in this project. Integration tests require Docker because Testcontainers starts PostgreSQL/PostGIS containers automatically.
+This selector does not include integration-style classes whose names end in `IntegrationTest`. Use the regular `./gradlew test` task for the complete test suite. Tests matching `*IT` also run as part of that standard task. Testcontainers-based tests require Docker because they start PostgreSQL/PostGIS containers automatically.
 
 ## Repository Layout
 
@@ -601,19 +722,57 @@ fuel-finder/
 |       `-- ci.yml
 |-- backend/
 |   |-- .dockerignore
+|   |-- .gitattributes
+|   |-- .gitignore
 |   |-- Dockerfile
+|   |-- HELP.md
 |   |-- build.gradle
+|   |-- gradle.properties
+|   |-- gradle/
+|   |   `-- wrapper/
 |   |-- gradlew
 |   |-- gradlew.bat
+|   |-- settings.gradle
 |   `-- src/
 |       |-- main/
 |       |   |-- java/uk/co/fuelfinder/
+|       |   |   |-- api/
+|       |   |   |-- common/
+|       |   |   |-- config/
+|       |   |   |-- ingestion/
+|       |   |   |   |-- exception/
+|       |   |   |   |-- normalize/
+|       |   |   |   `-- raw/
+|       |   |   |       |-- auth/
+|       |   |   |       |-- client/
+|       |   |   |       |-- http/
+|       |   |   |       |-- orchestrator/
+|       |   |   |       `-- writer/
+|       |   |   |-- observability/
+|       |   |   `-- persistence/
+|       |   |       |-- entity/
+|       |   |       `-- repository/
 |       |   `-- resources/
+|       |       |-- db/migration/
+|       |       |-- application.yaml
+|       |       |-- application-local.yml
+|       |       |-- application-local-manual.yml
+|       |       |-- application-prod.yml
+|       |       `-- templates/
 |       `-- test/
-|-- docs/
-|-- docker/
+|           |-- java/
+|           `-- resources/
+|-- observability/
+|   |-- prometheus/
+|   |   `-- prometheus.yml
+|   `-- grafana/
+|       |-- dashboards/
+|       `-- provisioning/
 |-- .env.example
+|-- .env.prod.example
+|-- .gitignore
 |-- docker-compose.yml
+|-- LICENSE
 `-- README.md
 ```
 
@@ -623,9 +782,14 @@ Near-term priorities:
 
 - extend read APIs with richer filters and query shapes
 - extend integration tests to cover more ingestion edge cases and failure paths
+- tune the existing HTTP timeout, pool, and retry defaults with representative load and ingestion-duration data
+- define service-level objectives and alert rules from the existing Prometheus metrics and Grafana dashboard
+- secure and route the Prometheus endpoint within the eventual production monitoring network
+- evaluate distributed tracing only if cross-service diagnostic needs justify it
 - publish versioned Docker images to a registry and add deployment/promotion workflows
 - raise JaCoCo coverage thresholds over time
-- deepen observability beyond the current API request logging and ingestion diagnostics
+
+Bounded HTTP resilience and metrics/dashboard observability are implemented foundations; the remaining work is operational tuning, alerting, controlled production access, and deployment integration.
 
 ## Why This Project
 
@@ -642,8 +806,15 @@ This project is meant to demonstrate practical backend engineering concerns such
 ## What This Repository Demonstrates
 
 - integration with an OAuth2-protected external API
+- bounded Reactor Netty connection management with validated timeouts, retry/backoff, `Retry-After`, and failure classification
 - paginated ingestion and raw payload retention
 - normalization into a relational/geospatial model
+- count-based ingestion reconciliation with explicit skip and failure outcomes
+- deduplicated historical observations and a latest-price read model
+- PostGIS-backed station queries with local Caffeine caching and transaction-safe invalidation
+- an explicit production Actuator endpoint-exposure policy and low-cardinality Micrometer metrics
+- an optional, reproducible Prometheus/Grafana local monitoring stack with a provisioned dashboard
+- unit, Spring context, and Testcontainers integration testing with JaCoCo verification
 - separation between ingestion, persistence, and read APIs
 - backend-first project structure designed for incremental evolution
 

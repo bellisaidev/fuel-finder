@@ -60,7 +60,7 @@ class ProductionConfigurationTest {
                     assertThat(datasourceProperties.getPassword()).isEqualTo("production-password");
 
                     assertThat(context.getEnvironment().getProperty(
-                            "management.endpoints.web.exposure.include")).isEqualTo("health,info");
+                            "management.endpoints.web.exposure.include")).isEqualTo("health,info,prometheus");
                     assertThat(context.getEnvironment().getProperty(
                             "management.endpoint.health.show-details")).isEqualTo("never");
                     assertThat(context.getEnvironment().getProperty(
