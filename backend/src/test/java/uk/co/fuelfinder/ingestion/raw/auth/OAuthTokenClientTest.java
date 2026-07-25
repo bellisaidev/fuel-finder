@@ -16,9 +16,13 @@ import uk.co.fuelfinder.ingestion.exception.FuelFinderAuthenticationException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderConnectivityException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderInvalidResponseException;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpExceptionMapper;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpResilience;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,7 +35,7 @@ class OAuthTokenClientTest {
     @Test
     void generateAccessTokenReturnsParsedResponse() {
         AtomicReference<ClientRequest> capturedRequest = new AtomicReference<>();
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> {
                     capturedRequest.set(request);
                     return jsonResponse(HttpStatus.OK, """
@@ -62,7 +66,7 @@ class OAuthTokenClientTest {
 
     @Test
     void generateAccessTokenThrowsAuthenticationExceptionForClientError() {
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> jsonResponse(HttpStatus.UNAUTHORIZED, "{\"error\":\"invalid_client\"}")),
                 properties(),
                 objectMapper
@@ -70,13 +74,13 @@ class OAuthTokenClientTest {
 
         assertThatThrownBy(client::generateAccessToken)
                 .isInstanceOf(FuelFinderAuthenticationException.class)
-                .hasMessageContaining("client error")
+                .hasMessageContaining("failed authentication")
                 .hasMessageContaining("401 UNAUTHORIZED");
     }
 
     @Test
     void generateAccessTokenThrowsConnectivityExceptionForRequestFailure() {
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> Mono.error(new WebClientRequestException(
                         new IOException("connection refused"),
                         HttpMethod.POST,
@@ -94,7 +98,7 @@ class OAuthTokenClientTest {
 
     @Test
     void generateAccessTokenThrowsIntegrationExceptionForServerError() {
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> jsonResponse(HttpStatus.SERVICE_UNAVAILABLE, "{\"error\":\"unavailable\"}")),
                 properties(),
                 objectMapper
@@ -102,13 +106,13 @@ class OAuthTokenClientTest {
 
         assertThatThrownBy(client::generateAccessToken)
                 .isInstanceOf(FuelFinderIntegrationException.class)
-                .hasMessageContaining("Unexpected error during Fuel Finder token acquisition")
-                .hasRootCauseMessage("Fuel Finder token request failed with server error: status=503 SERVICE_UNAVAILABLE, body={\"error\":\"unavailable\"}");
+                .hasMessageContaining("Fuel Finder token request failed")
+                .hasMessageContaining("503 SERVICE_UNAVAILABLE");
     }
 
     @Test
     void generateAccessTokenThrowsInvalidResponseExceptionWhenBodyIsNull() {
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> Mono.just(ClientResponse.create(HttpStatus.OK).build())),
                 properties(),
                 objectMapper
@@ -121,7 +125,7 @@ class OAuthTokenClientTest {
 
     @Test
     void generateAccessTokenThrowsInvalidResponseExceptionWhenTokenMissing() {
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> jsonResponse(HttpStatus.OK, """
                         {
                           "success": true,
@@ -145,7 +149,7 @@ class OAuthTokenClientTest {
 
     @Test
     void generateAccessTokenThrowsInvalidResponseExceptionWhenExpiryIsInvalid() {
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> jsonResponse(HttpStatus.OK, """
                         {
                           "success": true,
@@ -169,7 +173,7 @@ class OAuthTokenClientTest {
 
     @Test
     void generateAccessTokenWrapsUnexpectedFailure() {
-        OAuthTokenClient client = new OAuthTokenClient(
+        OAuthTokenClient client = newClient(
                 webClient(request -> Mono.error(new IllegalStateException("boom"))),
                 properties(),
                 objectMapper
@@ -195,6 +199,58 @@ class OAuthTokenClientTest {
 
     private static WebClient webClient(ExchangeFunction exchangeFunction) {
         return WebClient.builder().exchangeFunction(exchangeFunction).build();
+    }
+
+    @Test
+    void generateAccessTokenRetriesTransientServerFailureAndRecovers() {
+        AtomicInteger attempts = new AtomicInteger();
+        FuelFinderApiProperties properties = properties();
+        properties.getHttp().getRetry().setMaxRetries(1);
+        properties.getHttp().getRetry().setInitialBackoff(Duration.ofMillis(1));
+        properties.getHttp().getRetry().setMaxBackoff(Duration.ofMillis(1));
+        properties.getHttp().getRetry().setJitter(0);
+        OAuthTokenClient client = newClientWithConfiguredRetry(
+                webClient(request -> attempts.incrementAndGet() == 1
+                        ? jsonResponse(HttpStatus.SERVICE_UNAVAILABLE, "{\"error\":\"unavailable\"}")
+                        : jsonResponse(HttpStatus.OK, """
+                                {
+                                  "data": {
+                                    "access_token": "recovered",
+                                    "token_type": "Bearer",
+                                    "expires_in": 3600
+                                  }
+                                }
+                                """)),
+                properties,
+                objectMapper
+        );
+
+        assertThat(client.generateAccessToken().data().access_token()).isEqualTo("recovered");
+        assertThat(attempts).hasValue(2);
+    }
+
+    private static OAuthTokenClient newClient(
+            WebClient webClient,
+            FuelFinderApiProperties properties,
+            ObjectMapper objectMapper
+    ) {
+        properties.getHttp().getRetry().setMaxRetries(0);
+        return newClientWithConfiguredRetry(webClient, properties, objectMapper);
+    }
+
+    private static OAuthTokenClient newClientWithConfiguredRetry(
+            WebClient webClient,
+            FuelFinderApiProperties properties,
+            ObjectMapper objectMapper
+    ) {
+        FuelFinderHttpResilience resilience = new FuelFinderHttpResilience(properties);
+        return new OAuthTokenClient(
+                webClient,
+                properties,
+                objectMapper,
+                resilience,
+                new FuelFinderHttpExceptionMapper(resilience, objectMapper)
+        );
     }
 
     private static Mono<ClientResponse> jsonResponse(HttpStatus status, String body) {

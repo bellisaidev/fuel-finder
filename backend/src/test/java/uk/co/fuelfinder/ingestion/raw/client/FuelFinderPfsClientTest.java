@@ -8,10 +8,18 @@ import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
+import uk.co.fuelfinder.ingestion.exception.FuelFinderInvalidResponseException;
 import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderTokenProvider;
+import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderApiProperties;
 import uk.co.fuelfinder.ingestion.raw.client.dto.PfsStationDto;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpExceptionMapper;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpResilience;
 
 import java.util.List;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,7 +35,7 @@ class FuelFinderPfsClientTest {
         when(tokenProvider.getAccessToken()).thenReturn("token-123");
 
         AtomicReference<ClientRequest> capturedRequest = new AtomicReference<>();
-        FuelFinderPfsClient client = new FuelFinderPfsClient(
+        FuelFinderPfsClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> {
                             capturedRequest.set(request);
@@ -65,7 +73,7 @@ class FuelFinderPfsClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-123");
 
-        FuelFinderPfsClient client = new FuelFinderPfsClient(
+        FuelFinderPfsClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.OK, """
                                 [
@@ -90,7 +98,7 @@ class FuelFinderPfsClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-123");
 
-        FuelFinderPfsClient client = new FuelFinderPfsClient(
+        FuelFinderPfsClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.OK, "[]"))
                         .build(),
@@ -105,7 +113,7 @@ class FuelFinderPfsClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-123");
 
-        FuelFinderPfsClient client = new FuelFinderPfsClient(
+        FuelFinderPfsClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.NOT_FOUND, """
                                 {
@@ -124,11 +132,31 @@ class FuelFinderPfsClientTest {
     }
 
     @Test
+    void batchUnavailableSentinelIsNotRetriedEvenOnTransientStatus() {
+        FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
+        when(tokenProvider.getAccessToken()).thenReturn("token-123");
+        AtomicInteger attempts = new AtomicInteger();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> {
+                    attempts.incrementAndGet();
+                    return jsonResponse(HttpStatus.SERVICE_UNAVAILABLE, """
+                            {"message":"Requested batch 6 is not available"}
+                            """);
+                })
+                .build();
+        FuelFinderApiProperties properties = new FuelFinderApiProperties();
+        properties.getHttp().getRetry().setJitter(0);
+
+        assertThat(newClient(webClient, tokenProvider, properties).fetchBatch(6)).isEmpty();
+        assertThat(attempts).hasValue(1);
+    }
+
+    @Test
     void fetchBatchThrowsWhenResponseBodyIsEmpty() {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-123");
 
-        FuelFinderPfsClient client = new FuelFinderPfsClient(
+        FuelFinderPfsClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.OK).build()))
                         .build(),
@@ -136,7 +164,7 @@ class FuelFinderPfsClientTest {
         );
 
         assertThatThrownBy(() -> client.fetchBatch(1))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(FuelFinderInvalidResponseException.class)
                 .hasMessage("Fuel Finder PFS response was null");
     }
 
@@ -145,7 +173,7 @@ class FuelFinderPfsClientTest {
         FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
         when(tokenProvider.getAccessToken()).thenReturn("token-123");
 
-        FuelFinderPfsClient client = new FuelFinderPfsClient(
+        FuelFinderPfsClient client = newClient(
                 WebClient.builder()
                         .exchangeFunction(request -> jsonResponse(HttpStatus.BAD_GATEWAY, "{\"error\":\"upstream\"}"))
                         .build(),
@@ -153,8 +181,8 @@ class FuelFinderPfsClientTest {
         );
 
         assertThatThrownBy(() -> client.fetchBatch(3))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Fuel Finder PFS request failed")
+                .isInstanceOf(FuelFinderIntegrationException.class)
+                .hasMessageContaining("Fuel Finder PFS batch 3 request failed")
                 .hasMessageContaining("502 BAD_GATEWAY");
     }
 
@@ -163,5 +191,49 @@ class FuelFinderPfsClientTest {
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .body(body)
                 .build());
+    }
+
+    @Test
+    void fetchBatchRetriesTransientServerFailureAndRecovers() {
+        FuelFinderTokenProvider tokenProvider = mock(FuelFinderTokenProvider.class);
+        when(tokenProvider.getAccessToken()).thenReturn("token-123");
+        AtomicInteger attempts = new AtomicInteger();
+        WebClient webClient = WebClient.builder()
+                .exchangeFunction(request -> attempts.incrementAndGet() == 1
+                        ? jsonResponse(HttpStatus.SERVICE_UNAVAILABLE, "{\"error\":\"unavailable\"}")
+                        : jsonResponse(HttpStatus.OK, "[]"))
+                .build();
+
+        FuelFinderApiProperties properties = new FuelFinderApiProperties();
+        properties.getHttp().getRetry().setMaxRetries(1);
+        properties.getHttp().getRetry().setInitialBackoff(Duration.ofMillis(1));
+        properties.getHttp().getRetry().setMaxBackoff(Duration.ofMillis(1));
+        properties.getHttp().getRetry().setJitter(0);
+
+        assertThat(newClient(webClient, tokenProvider, properties).fetchBatch(2)).isEmpty();
+        assertThat(attempts).hasValue(2);
+    }
+
+    private static FuelFinderPfsClient newClient(
+            WebClient webClient,
+            FuelFinderTokenProvider tokenProvider
+    ) {
+        FuelFinderApiProperties properties = new FuelFinderApiProperties();
+        properties.getHttp().getRetry().setMaxRetries(0);
+        return newClient(webClient, tokenProvider, properties);
+    }
+
+    private static FuelFinderPfsClient newClient(
+            WebClient webClient,
+            FuelFinderTokenProvider tokenProvider,
+            FuelFinderApiProperties properties
+    ) {
+        FuelFinderHttpResilience resilience = new FuelFinderHttpResilience(properties);
+        return new FuelFinderPfsClient(
+                webClient,
+                tokenProvider,
+                resilience,
+                new FuelFinderHttpExceptionMapper(resilience, new ObjectMapper())
+        );
     }
 }

@@ -8,10 +8,9 @@ import org.springframework.web.reactive.function.client.WebClient;
 import uk.co.fuelfinder.ingestion.raw.auth.FuelFinderTokenProvider;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPriceDto;
 import uk.co.fuelfinder.ingestion.raw.client.dto.FuelPricesStationDto;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderAuthenticationException;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderConnectivityException;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderInvalidResponseException;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpExceptionMapper;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpResilience;
 
 import java.util.List;
 
@@ -23,20 +22,26 @@ public class FuelFinderFuelPricesClient {
 
     private final WebClient fuelFinderApiWebClient;
     private final FuelFinderTokenProvider tokenProvider;
+    private final FuelFinderHttpResilience resilience;
+    private final FuelFinderHttpExceptionMapper exceptionMapper;
 
     public FuelFinderFuelPricesClient(
             @Qualifier("fuelFinderApiWebClient") WebClient fuelFinderApiWebClient,
-            FuelFinderTokenProvider tokenProvider
+            FuelFinderTokenProvider tokenProvider,
+            FuelFinderHttpResilience resilience,
+            FuelFinderHttpExceptionMapper exceptionMapper
     ) {
         this.fuelFinderApiWebClient = fuelFinderApiWebClient;
         this.tokenProvider = tokenProvider;
+        this.resilience = resilience;
+        this.exceptionMapper = exceptionMapper;
     }
 
     public List<FuelPricesStationDto> fetchFuelPrices(int batchNumber) {
         log.info("Fetching Fuel Finder fuel prices batch {}", batchNumber);
 
         try {
-            List<FuelPricesStationDto> response = fuelFinderApiWebClient
+            List<FuelPricesStationDto> response = resilience.execute(fuelFinderApiWebClient
                     .get()
                     .uri(uriBuilder -> uriBuilder
                             .path(FUEL_PRICES_PATH)
@@ -46,10 +51,9 @@ public class FuelFinderFuelPricesClient {
                     .retrieve()
                     .onStatus(
                             status -> status.isError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> mapError(batchNumber, clientResponse.statusCode().toString(), body))
+                            clientResponse -> FuelFinderWebClientErrors.mapBatchError(clientResponse, batchNumber)
                     )
-                    .bodyToMono(new ParameterizedTypeReference<List<FuelPricesStationDto>>() {})
+                    .bodyToMono(new ParameterizedTypeReference<List<FuelPricesStationDto>>() {}))
                     .block();
 
             if (response == null) {
@@ -70,23 +74,12 @@ public class FuelFinderFuelPricesClient {
                     batchNumber
             );
             return List.of();
-        } catch (FuelFinderAuthenticationException | FuelFinderConnectivityException | FuelFinderInvalidResponseException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new FuelFinderIntegrationException(
-                    "Unexpected error while fetching Fuel Finder fuel prices batch " + batchNumber, e
+        } catch (RuntimeException e) {
+            throw exceptionMapper.mapApiFailure(
+                    "Fuel Finder fuel prices batch " + batchNumber + " request",
+                    e
             );
         }
-    }
-
-    private RuntimeException mapError(int batchNumber, String statusCode, String body) {
-        if (body != null && body.contains("Requested batch " + batchNumber + " is not available")) {
-            return new FuelFinderBatchUnavailableException(body);
-        }
-
-        return new FuelFinderIntegrationException(
-                "Fuel Finder fuel prices request failed: status=" + statusCode + ", body=" + body
-        );
     }
 
     private void logSample(List<FuelPricesStationDto> stations) {

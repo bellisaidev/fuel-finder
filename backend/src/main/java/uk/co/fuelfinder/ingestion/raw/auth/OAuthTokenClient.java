@@ -6,12 +6,9 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientRequestException;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderAuthenticationException;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderConnectivityException;
 import uk.co.fuelfinder.ingestion.exception.FuelFinderInvalidResponseException;
-import uk.co.fuelfinder.ingestion.exception.FuelFinderIntegrationException;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpExceptionMapper;
+import uk.co.fuelfinder.ingestion.raw.http.FuelFinderHttpResilience;
 
 import java.util.Map;
 
@@ -22,15 +19,21 @@ public class OAuthTokenClient {
     private final WebClient fuelFinderAuthWebClient;
     private final FuelFinderApiProperties properties;
     private final ObjectMapper objectMapper;
+    private final FuelFinderHttpResilience resilience;
+    private final FuelFinderHttpExceptionMapper exceptionMapper;
 
     public OAuthTokenClient(
             @Qualifier("fuelFinderAuthWebClient") WebClient fuelFinderAuthWebClient,
             FuelFinderApiProperties properties,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            FuelFinderHttpResilience resilience,
+            FuelFinderHttpExceptionMapper exceptionMapper
     ) {
         this.fuelFinderAuthWebClient = fuelFinderAuthWebClient;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.resilience = resilience;
+        this.exceptionMapper = exceptionMapper;
     }
 
     public TokenResponse generateAccessToken() {
@@ -42,27 +45,13 @@ public class OAuthTokenClient {
         logSafeRequest(request);
 
         try {
-            TokenResponse response = fuelFinderAuthWebClient.post()
+            TokenResponse response = resilience.execute(fuelFinderAuthWebClient.post()
                     .uri(properties.getOauth().getTokenPath())
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
                     .bodyValue(request)
                     .retrieve()
-                    .onStatus(
-                            status -> status.is4xxClientError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> new FuelFinderAuthenticationException(
-                                            "Fuel Finder token request failed with client error: status="
-                                                    + clientResponse.statusCode() + ", body=" + body))
-                    )
-                    .onStatus(
-                            status -> status.is5xxServerError(),
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .map(body -> new FuelFinderIntegrationException(
-                                            "Fuel Finder token request failed with server error: status="
-                                                    + clientResponse.statusCode() + ", body=" + body))
-                    )
-                    .bodyToMono(TokenResponse.class)
+                    .bodyToMono(TokenResponse.class))
                     .block();
 
             validateTokenResponse(response);
@@ -72,28 +61,8 @@ public class OAuthTokenClient {
 
             return response;
 
-        } catch (FuelFinderAuthenticationException e) {
-            throw e;
-
-        } catch (WebClientRequestException e) {
-            throw new FuelFinderConnectivityException(
-                    "Fuel Finder token request failed due to connectivity issue. " +
-                            "Check VPN, DNS, proxy, firewall, or remote host availability.",
-                    e
-            );
-
-        } catch (WebClientResponseException e) {
-            throw new FuelFinderIntegrationException(
-                    "Fuel Finder token request failed: status=" + e.getStatusCode() +
-                            ", responseBody=" + e.getResponseBodyAsString(),
-                    e
-            );
-
-        } catch (FuelFinderInvalidResponseException e) {
-            throw e;
-
-        } catch (Exception e) {
-            throw new FuelFinderIntegrationException("Unexpected error during Fuel Finder token acquisition", e);
+        } catch (RuntimeException e) {
+            throw exceptionMapper.mapOAuthFailure(e);
         }
     }
 

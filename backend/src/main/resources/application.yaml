@@ -65,6 +65,23 @@ fuelfinder:
     oauth:
       token-path: /oauth/generate_access_token
       refresh-path: /oauth/regenerate_access_token
+    # Initial operational defaults. Tune using ingestion-duration metrics and load testing.
+    http:
+      connect-timeout: 5s
+      response-timeout: 20s
+      pool:
+        max-connections: 20
+        pending-acquire-max-count: 40
+        pending-acquire-timeout: 5s
+        max-idle-time: 30s
+        max-life-time: 5m
+        eviction-interval: 30s
+      retry:
+        max-retries: 2
+        initial-backoff: 500ms
+        max-backoff: 5s
+        jitter: 0.5
+        max-retry-after: 30s
   ingestion:
     reconciliation:
       unexplained-mismatch-action: fail
