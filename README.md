@@ -10,6 +10,7 @@ What is implemented today:
 
 - Spring Boot backend with Java 21
 - PostgreSQL + PostGIS local environment via Docker Compose
+- Optional Prometheus and Grafana local observability stack
 - Backend Docker image build
 - GitHub Actions CI for tests, coverage verification, JAR build, and Docker build
 - Flyway database migrations
@@ -355,6 +356,28 @@ Health endpoint:
 http://localhost:8080/actuator/health
 ```
 
+Prometheus scrape endpoint:
+
+```text
+http://localhost:8080/actuator/prometheus
+```
+
+### 7. Optional: start Prometheus and Grafana
+
+The default Compose workflow remains database-only. With the backend running on the host, start the optional observability services with:
+
+```bash
+docker compose --profile observability up -d
+```
+
+Local endpoints:
+
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+- Grafana dashboard: **Fuel Finder / Fuel Finder Overview**
+
+Grafana uses `admin` / `admin` for local development unless `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` are set. Prometheus scrapes the host-run backend at `host.docker.internal:8080`.
+
 Nearby stations:
 
 ```text
@@ -442,7 +465,7 @@ These values are explicitly defined by the current base and production YAML conf
 | OAuth refresh path | `/oauth/regenerate_access_token` |
 | Ingestion scheduler | Enabled, every 30 minutes |
 | Ingestion retailer | `FUEL_FINDER_API` |
-| Actuator web exposure | `health,info` |
+| Actuator web exposure | `health,info,prometheus` |
 | Health details | `never` |
 | OpenAPI API docs | Disabled |
 | Swagger UI | Disabled |
@@ -493,6 +516,51 @@ Notes:
 - history-cache entries are cleared after a successful transaction commit that changes `price_observation`
 - the station-details cache is also cleared after a successful transaction commit that changes station metadata
 - equivalent requests such as `fuelType=e5` and `fuelType=E5` reuse the same cache entry after normalization
+- Caffeine statistics are enabled and exported through Spring Boot's built-in `cache.*` metrics
+
+### Metrics and Local Observability
+
+Adding the Prometheus Micrometer registry makes metrics available at:
+
+```text
+/actuator/prometheus
+```
+
+This endpoint must be reachable by Prometheus or equivalent monitoring infrastructure, but it must not be exposed as a public application endpoint. Restrict it through deployment networking, firewall rules, a private management route, or reverse-proxy access policy.
+
+Fuel Finder custom meters use bounded tags only:
+
+| Java meter | Type | Tags | Meaning |
+|---|---|---|---|
+| `fuelfinder.ingestion.duration` | Timer | `outcome=success\|failure` | Complete ingestion execution duration; the Timer count is also the run count |
+| `fuelfinder.ingestion.reconciliation` | Counter | `status=ok\|ok_with_skips\|failed` | Reconciliation outcomes |
+| `fuelfinder.ingestion.stations.processed` | Counter | none | Accepted and normalized station records |
+| `fuelfinder.ingestion.prices.processed` | Counter | none | Accepted and normalized price observations |
+| `fuelfinder.ingestion.last.attempt.timestamp` | Gauge (epoch seconds) | none | Last attempt start |
+| `fuelfinder.ingestion.last.success.timestamp` | Gauge (epoch seconds) | none | Last successful completion |
+
+The timestamp gauges start at `0` after each application start. A zero value means **not observed since process start**, not Unix epoch freshness. The provisioned Grafana dashboard filters zero values before calculating age and displays “Not observed since process start” instead.
+
+The dashboard also uses Spring Boot/Micrometer metrics instead of duplicating them:
+
+- `http.server.requests` for API request rate, error rate, and average latency
+- `jvm.*` for JVM memory
+- `process.*` for process availability and uptime
+- `jdbc.connections.*` and `hikaricp.*` for the datasource pool
+- `http.client.requests` for managed Fuel Finder WebClient requests
+- `cache.*` for Caffeine cache statistics
+
+The dashboard panel titled **Recent/time-window maximum ingestion duration** uses Micrometer Timer max. This is a decaying time-window maximum, not an all-time maximum.
+
+The observability files are under [`observability/`](observability). The profile is intentionally optional:
+
+```bash
+# Database only
+docker compose up -d
+
+# Database, Prometheus, and Grafana
+docker compose --profile observability up -d
+```
 
 ## CI
 
@@ -517,6 +585,7 @@ Current test coverage includes:
 
 - unit tests for OAuth token retrieval and Fuel Finder API clients
 - unit tests for ingestion orchestration, station normalization, latest-price projection, price observation ingestion, utility logic, station query services, and custom exceptions
+- unit tests for custom ingestion metrics, bounded tags, durations, processed counts, outcomes, and timestamps
 - reconciliation tests for `OK`, `OK_WITH_SKIPS`, `FAILED + FAIL`, `FAILED + WARN`, normalization skips, duplicate observations, and missing-station persistence outcomes
 - cache-focused tests for normalized query keys, repeated-query cache hits, and after-commit cache invalidation behavior
 - integration tests for station details, in-bounds queries, price history, price history summaries, and cache invalidation
