@@ -1,0 +1,94 @@
+groups:
+  - name: fuel-finder
+    rules:
+      - alert: FuelFinderTargetUnavailable
+        expr: up{job="fuel-finder"} == 0
+        for: 2m
+        labels:
+          service: fuel-finder
+          severity: critical
+          action: page
+        annotations:
+          summary: Fuel Finder target is unavailable
+          description: Prometheus has been unable to scrape the Fuel Finder target for at least 2 minutes.
+
+      - alert: FuelFinderIngestionAttemptMissing
+        expr: |
+          (
+            (
+              fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder"} == 0
+              and on (job, instance)
+              process_uptime_seconds{job="fuel-finder"} > 45 * 60
+            )
+            or
+            (
+              fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder"} > 0
+              and
+              time() - fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder"} > 45 * 60
+            )
+          )
+          and on (job, instance)
+          up{job="fuel-finder"} == 1
+        for: 5m
+        labels:
+          service: fuel-finder
+          severity: critical
+          action: page
+        annotations:
+          summary: Fuel Finder ingestion attempts are missing
+          description: No Fuel Finder ingestion attempt has been recorded within the last 45 minutes.
+
+      - alert: FuelFinderIngestionNotSucceeding
+        expr: |
+          sum by (job, instance) (
+            increase(fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", outcome="failure"}[75m])
+          ) >= 2
+          and on (job, instance)
+          sum by (job, instance) (
+            increase(fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", outcome="success"}[75m])
+          ) == 0
+          and on (job, instance)
+          fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder"} > 0
+          and on (job, instance)
+          time() - fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder"} <= 45 * 60
+          and on (job, instance)
+          up{job="fuel-finder"} == 1
+        for: 5m
+        labels:
+          service: fuel-finder
+          severity: critical
+          action: page
+        annotations:
+          summary: Fuel Finder ingestion is not succeeding
+          description: At least two ingestion attempts failed and none succeeded in the last 75 minutes.
+
+      - alert: FuelFinderReconciliationFailed
+        expr: |
+          sum by (job, instance) (
+            increase(fuelfinder_ingestion_reconciliation_total{job="fuel-finder", status="failed"}[45m])
+          ) > 0
+        labels:
+          service: fuel-finder
+          severity: warning
+          action: warn
+        annotations:
+          summary: Fuel Finder reconciliation failed
+          description: At least one Fuel Finder reconciliation failed in the last 45 minutes.
+
+      - alert: FuelFinderDatabasePoolSaturated
+        expr: |
+          hikaricp_connections_pending{job="fuel-finder"} > 0
+          and on (job, instance, pool)
+          (
+            hikaricp_connections_active{job="fuel-finder"}
+            /
+            hikaricp_connections_max{job="fuel-finder"}
+          ) >= 0.9
+        for: 5m
+        labels:
+          service: fuel-finder
+          severity: warning
+          action: warn
+        annotations:
+          summary: Fuel Finder database connection pool is saturated
+          description: At least 90% of database connections are active while borrowers have been pending for 5 minutes.
