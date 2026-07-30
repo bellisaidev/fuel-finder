@@ -270,7 +270,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[$__rate_interval]))",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"fuel-finder\",uri!~\"/actuator.*\"}[$__rate_interval]))",
           "legendFormat": "requests",
           "refId": "A"
         }
@@ -316,12 +316,12 @@
       },
       "targets": [
         {
-          "expr": "100 * sum(rate(http_server_requests_seconds_count{status=~\"4..|5..\",uri!~\"/actuator.*\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[$__rate_interval]))",
-          "legendFormat": "error rate",
+          "expr": "100 * sum(rate(http_server_requests_seconds_count{job=\"fuel-finder\",status=~\"4..\",uri!~\"/actuator.*\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{job=\"fuel-finder\",uri!~\"/actuator.*\"}[$__rate_interval]))",
+          "legendFormat": "4xx ratio",
           "refId": "A"
         }
       ],
-      "title": "API 4xx/5xx error rate",
+      "title": "API 4xx error ratio",
       "type": "stat"
     },
     {
@@ -329,13 +329,26 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "Dashboard-only alert candidate. Informational threshold: 5xx ratio above 5% when at least 20 non-Actuator requests were observed in 10 minutes.",
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
           },
-          "decimals": 3,
-          "unit": "s"
+          "unit": "percent"
         },
         "overrides": []
       },
@@ -343,6 +356,67 @@
         "h": 7,
         "w": 8,
         "x": 0,
+        "y": 12
+      },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "expr": "(100 * sum(increase(http_server_requests_seconds_count{job=\"fuel-finder\",status=~\"5..\",uri!~\"/actuator.*\"}[10m])) / sum(increase(http_server_requests_seconds_count{job=\"fuel-finder\",uri!~\"/actuator.*\"}[10m]))) and (sum(increase(http_server_requests_seconds_count{job=\"fuel-finder\",uri!~\"/actuator.*\"}[10m])) >= 20)",
+          "legendFormat": "5xx ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "Dashboard-only candidate: API 5xx ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Dashboard-only alert candidate. Informational threshold: mean latency above 1 second when at least 20 non-Actuator requests were observed in 10 minutes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
         "y": 12
       },
       "id": 8,
@@ -356,16 +430,66 @@
         "tooltip": {
           "mode": "single",
           "sort": "none"
+        },
+        "thresholdsStyle": {
+          "mode": "line"
         }
       },
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_sum{uri!~\"/actuator.*\"}[$__rate_interval])) / sum(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[$__rate_interval]))",
-          "legendFormat": "average latency",
+          "expr": "(sum(increase(http_server_requests_seconds_sum{job=\"fuel-finder\",uri!~\"/actuator.*\"}[10m])) / sum(increase(http_server_requests_seconds_count{job=\"fuel-finder\",uri!~\"/actuator.*\"}[10m]))) and (sum(increase(http_server_requests_seconds_count{job=\"fuel-finder\",uri!~\"/actuator.*\"}[10m])) >= 20)",
+          "legendFormat": "mean latency",
           "refId": "A"
         }
       ],
-      "title": "Average API request latency",
+      "title": "Dashboard-only candidate: Mean API latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Rolling non-Actuator request count used as traffic context for the 5xx-ratio and mean-latency dashboard-only candidates.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(http_server_requests_seconds_count{job=\"fuel-finder\",uri!~\"/actuator.*\"}[10m]))",
+          "legendFormat": "requests in 10m",
+          "refId": "A"
+        }
+      ],
+      "title": "Non-Actuator request volume (10m)",
       "type": "timeseries"
     },
     {
@@ -384,9 +508,9 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 12
+        "w": 12,
+        "x": 0,
+        "y": 19
       },
       "id": 9,
       "options": {
@@ -435,9 +559,9 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 12
+        "w": 12,
+        "x": 12,
+        "y": 19
       },
       "id": 10,
       "options": {
