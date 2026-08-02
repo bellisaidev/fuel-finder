@@ -9,6 +9,8 @@ group = 'uk.fuelfinder'
 version = '0.0.1-SNAPSHOT'
 description = 'Backend service for aggregating UK fuel prices and exposing geo-based APIs using open Fuel Finder Scheme data.'
 
+ext['tomcat.version'] = '10.1.57'
+
 java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(21)
