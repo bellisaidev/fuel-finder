@@ -57,12 +57,13 @@ jobs:
         run: ./gradlew bootJar
 
   container-build-and-scan:
-    name: Build Container Image
+    name: Build and Scan Container Image
     needs: build-and-test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+      security-events: write
 
     defaults:
       run:
@@ -79,3 +80,34 @@ jobs:
 
       - name: Build Docker image
         run: docker build --pull --tag "$IMAGE_REF" .
+
+      - name: Scan image for High and Critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_REF }}
+          format: table
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          vuln-type: os,library
+          version: v0.70.0
+
+      - name: Generate High and Critical vulnerability SARIF
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_REF }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
+          scanners: vuln
+          vuln-type: os,library
+          skip-setup-trivy: true
+
+      - name: Upload Trivy results to GitHub code scanning
+        if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-container
