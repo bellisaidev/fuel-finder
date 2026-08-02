@@ -699,6 +699,8 @@ The stop command names only the current Compose services `prometheus` and `grafa
 
 GitHub Actions CI is defined in [ci.yml](.github/workflows/ci.yml).
 
+The repository's blocking and informational security checks are described in the [CI security policy](docs/ci-security-policy.md).
+
 The workflow runs on push and pull requests targeting `master`, using the backend module as its working directory. It currently:
 
 - sets up Java 21 with Temurin
@@ -706,9 +708,11 @@ The workflow runs on push and pull requests targeting `master`, using the backen
 - runs `./gradlew test`
 - runs `./gradlew jacocoTestCoverageVerification`
 - builds the Spring Boot JAR with `./gradlew bootJar`
-- builds the backend Docker image
+- builds the backend Docker image and reports its High/Critical vulnerabilities
 
 The test task includes integration tests matching `*IT`, so CI requires Docker for Testcontainers.
+
+Separate security workflows review pull-request dependency changes and analyze Java with CodeQL.
 
 ## Testing
 
@@ -803,7 +807,9 @@ This selector does not include integration-style classes whose names end in `Int
 fuel-finder/
 |-- .github/
 |   `-- workflows/
-|       `-- ci.yml
+|       |-- ci.yml
+|       |-- codeql.yml
+|       `-- dependency-review.yml
 |-- backend/
 |   |-- .dockerignore
 |   |-- .gitattributes
@@ -852,6 +858,8 @@ fuel-finder/
 |   `-- grafana/
 |       |-- dashboards/
 |       `-- provisioning/
+|-- docs/
+|   `-- ci-security-policy.md
 |-- .env.example
 |-- .env.prod.example
 |-- .gitignore
