@@ -1,0 +1,305 @@
+rule_files:
+  - ../rules/fuel-finder-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: target down pending duration
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '0+0x3'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: FuelFinderTargetUnavailable
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: FuelFinderTargetUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              service: fuel-finder
+              severity: critical
+              action: page
+            exp_annotations:
+              summary: Fuel Finder target is unavailable
+              description: Prometheus has been unable to scrape the Fuel Finder target for at least 2 minutes.
+
+  - name: zero attempt timestamp observes startup grace and pending duration
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x55'
+      - series: 'process_uptime_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '0+60x55'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '0+0x55'
+    alert_rule_test:
+      - eval_time: 44m
+        alertname: FuelFinderIngestionAttemptMissing
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: FuelFinderIngestionAttemptMissing
+        exp_alerts: []
+      - eval_time: 51m
+        alertname: FuelFinderIngestionAttemptMissing
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              service: fuel-finder
+              severity: critical
+              action: page
+            exp_annotations:
+              summary: Fuel Finder ingestion attempts are missing
+              description: No Fuel Finder ingestion attempt has been recorded within the last 45 minutes.
+
+  - name: fresh attempt timestamp stays quiet
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x70'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '4000+0x70'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: FuelFinderIngestionAttemptMissing
+        exp_alerts: []
+
+  - name: stale attempt timestamp fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x60'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 51m
+        alertname: FuelFinderIngestionAttemptMissing
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              service: fuel-finder
+              severity: critical
+              action: page
+            exp_annotations:
+              summary: Fuel Finder ingestion attempts are missing
+              description: No Fuel Finder ingestion attempt has been recorded within the last 45 minutes.
+
+  - name: one ingestion failure stays quiet
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x90'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '4800+0x90'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="failure"}'
+        values: '0+0x29 1+0x60'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="success"}'
+        values: '0+0x90'
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: FuelFinderIngestionNotSucceeding
+        exp_alerts: []
+
+  - name: two failures without success fire
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x90'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '4800+0x90'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="failure"}'
+        values: '0+0x19 1+0x9 2+0x60'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="success"}'
+        values: '0+0x90'
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: FuelFinderIngestionNotSucceeding
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              service: fuel-finder
+              severity: critical
+              action: page
+            exp_annotations:
+              summary: Fuel Finder ingestion is not succeeding
+              description: At least two ingestion attempts failed and none succeeded in the last 75 minutes.
+
+  - name: intervening success prevents failure alert
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x90'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '4800+0x90'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="failure"}'
+        values: '0+0x19 1+0x19 2+0x50'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="success"}'
+        values: '0+0x29 1+0x60'
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: FuelFinderIngestionNotSucceeding
+        exp_alerts: []
+
+  - name: stale success with recent attempts fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x90'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '4800+0x90'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="failure"}'
+        values: '0+0x19 1+0x9 2+0x60'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="success"}'
+        values: '0+0x4 1+0x85'
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: FuelFinderIngestionNotSucceeding
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              service: fuel-finder
+              severity: critical
+              action: page
+            exp_annotations:
+              summary: Fuel Finder ingestion is not succeeding
+              description: At least two ingestion attempts failed and none succeeded in the last 75 minutes.
+
+  - name: stale attempts activate only missing-attempt ingestion alert
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x90'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x90'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="failure"}'
+        values: '0+0x19 1+0x9 2+0x60'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="success"}'
+        values: '0+0x90'
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: FuelFinderIngestionAttemptMissing
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              service: fuel-finder
+              severity: critical
+              action: page
+            exp_annotations:
+              summary: Fuel Finder ingestion attempts are missing
+              description: No Fuel Finder ingestion attempt has been recorded within the last 45 minutes.
+      - eval_time: 85m
+        alertname: FuelFinderIngestionNotSucceeding
+        exp_alerts: []
+
+  - name: application down suppresses dependent ingestion alerts
+    interval: 1m
+    input_series:
+      - series: 'up{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '0+0x90'
+      - series: 'process_uptime_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '5400+0x90'
+      - series: 'fuelfinder_ingestion_last_attempt_timestamp_seconds{job="fuel-finder", instance="host.docker.internal:8080"}'
+        values: '1+0x90'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="failure"}'
+        values: '0+0x19 1+0x9 2+0x60'
+      - series: 'fuelfinder_ingestion_duration_seconds_count{job="fuel-finder", instance="host.docker.internal:8080", outcome="success"}'
+        values: '0+0x90'
+    alert_rule_test:
+      - eval_time: 85m
+        alertname: FuelFinderIngestionAttemptMissing
+        exp_alerts: []
+      - eval_time: 85m
+        alertname: FuelFinderIngestionNotSucceeding
+        exp_alerts: []
+
+  - name: failed reconciliation fires
+    interval: 1m
+    input_series:
+      - series: 'fuelfinder_ingestion_reconciliation_total{job="fuel-finder", instance="host.docker.internal:8080", status="failed"}'
+        values: '0+0x9 1+0x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: FuelFinderReconciliationFailed
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              service: fuel-finder
+              severity: warning
+              action: warn
+            exp_annotations:
+              summary: Fuel Finder reconciliation failed
+              description: At least one Fuel Finder reconciliation failed in the last 45 minutes.
+
+  - name: successful reconciliation statuses stay quiet
+    interval: 1m
+    input_series:
+      - series: 'fuelfinder_ingestion_reconciliation_total{job="fuel-finder", instance="host.docker.internal:8080", status="failed"}'
+        values: '0+0x30'
+      - series: 'fuelfinder_ingestion_reconciliation_total{job="fuel-finder", instance="host.docker.internal:8080", status="ok"}'
+        values: '0+0x9 1+0x20'
+      - series: 'fuelfinder_ingestion_reconciliation_total{job="fuel-finder", instance="host.docker.internal:8080", status="ok_with_skips"}'
+        values: '0+0x19 1+0x10'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: FuelFinderReconciliationFailed
+        exp_alerts: []
+
+  - name: high pool utilization without pending borrowers stays quiet
+    interval: 1m
+    input_series:
+      - series: 'hikaricp_connections_active{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '9+0x10'
+      - series: 'hikaricp_connections_max{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '10+0x10'
+      - series: 'hikaricp_connections_pending{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: FuelFinderDatabasePoolSaturated
+        exp_alerts: []
+
+  - name: pending borrowers below utilization threshold stay quiet
+    interval: 1m
+    input_series:
+      - series: 'hikaricp_connections_active{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '8+0x10'
+      - series: 'hikaricp_connections_max{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '10+0x10'
+      - series: 'hikaricp_connections_pending{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: FuelFinderDatabasePoolSaturated
+        exp_alerts: []
+
+  - name: high utilization plus pending borrowers fires
+    interval: 1m
+    input_series:
+      - series: 'hikaricp_connections_active{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '9+0x10'
+      - series: 'hikaricp_connections_max{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '10+0x10'
+      - series: 'hikaricp_connections_pending{job="fuel-finder", instance="host.docker.internal:8080", pool="HikariPool-1"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FuelFinderDatabasePoolSaturated
+        exp_alerts:
+          - exp_labels:
+              job: fuel-finder
+              instance: host.docker.internal:8080
+              pool: HikariPool-1
+              service: fuel-finder
+              severity: warning
+              action: warn
+            exp_annotations:
+              summary: Fuel Finder database connection pool is saturated
+              description: At least 90% of database connections are active while borrowers have been pending for 5 minutes.

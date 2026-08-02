@@ -28,6 +28,7 @@ What is implemented today:
 - Spring Boot Actuator and Micrometer metrics for HTTP, JVM, process, datasource/HikariCP, managed WebClient, and Caffeine caches
 - Low-cardinality ingestion outcome, duration, reconciliation, processed-count, and freshness metrics
 - Prometheus scrape export with a provisioned local Grafana datasource and Fuel Finder dashboard
+- Prometheus-managed operational alert rules for target reachability, ingestion health, reconciliation failures, and database pool saturation
 - Station persistence enriched with `address`, `city`, `county`, `country`, and `postcode`
 - Persistence model and schema for retailers, raw feeds, stations, price observations, and latest prices
 - Unit tests with JUnit 5 and Mockito across auth, client, normalization, exception, and ingestion orchestration components
@@ -575,7 +576,32 @@ Fuel Finder custom meters use bounded tags only:
 | `fuelfinder.ingestion.last.attempt.timestamp` | Gauge (epoch seconds) | none | Last attempt start |
 | `fuelfinder.ingestion.last.success.timestamp` | Gauge (epoch seconds) | none | Last successful completion |
 
-The timestamp gauges start at `0` after each application start. A zero value means **not observed since process start**, not Unix epoch freshness. The provisioned Grafana dashboard filters zero values before calculating age and displays “Not observed since process start” instead.
+#### Verified Prometheus metric contract
+
+The alert rules and dashboard rely on the following verified exported series:
+
+| Exported metric | Type | Bounded application labels | Meaning |
+|---|---|---|---|
+| `fuelfinder_ingestion_duration_seconds_count` | Timer count/counter | `outcome=success\|failure` | Completed ingestion executions by outcome |
+| `fuelfinder_ingestion_reconciliation_total` | Counter | `status=ok\|ok_with_skips\|failed` | Reconciliation outcomes |
+| `fuelfinder_ingestion_last_attempt_timestamp_seconds` | Gauge | none | Epoch timestamp when the latest ingestion attempt started |
+| `fuelfinder_ingestion_last_success_timestamp_seconds` | Gauge | none | Epoch timestamp when the latest successful ingestion completed |
+| `process_uptime_seconds` | Gauge | none | Current application process uptime |
+| `hikaricp_connections_active` | Gauge | `pool` | Active database connections by configured HikariCP pool |
+| `hikaricp_connections_max` | Gauge | `pool` | Maximum database connections by configured HikariCP pool |
+| `hikaricp_connections_pending` | Gauge | `pool` | Threads waiting to borrow a database connection |
+| `http_server_requests_seconds_count` | Timer count/counter | `status` and `uri` among the available labels | Completed Spring MVC requests |
+| `http_server_requests_seconds_sum` | Timer sum | `status` and `uri` among the available labels | Total duration of completed Spring MVC requests |
+
+The `outcome` and reconciliation `status` values above are the complete application-defined sets. The `pool` label is bounded by the configured datasource pools. Spring MVC supplies labels including HTTP `status` and templated `uri`; alert and dashboard queries avoid raw request paths. Prometheus adds the target labels `job` and `instance` when it scrapes these series.
+
+Additional custom metrics, including processed station and price counters and the Timer sum/max series, remain available at the scrape endpoint. The table above is the stable contract used by the current operational alert rules and the relevant dashboard panels.
+
+#### Freshness and restart semantics
+
+Both ingestion timestamp gauges reset to `0` whenever the application process restarts. Zero means **not observed since process start**; it must not be interpreted as a Unix epoch observation. `process_uptime_seconds` provides the startup grace used by the missing-attempt alert. The provisioned dashboard filters zero timestamps before calculating freshness and displays “Not observed since process start”.
+
+Counters, including ingestion Timer counts and reconciliation totals, also reset when the application restarts. Prometheus `increase()` queries handle ordinary counter resets, but an alert window that crosses a restart may contain less evidence than a window from a continuously running process.
 
 The Prometheus endpoint also exports Spring Boot/Micrometer metrics instead of duplicating them with custom Fuel Finder meters:
 
@@ -598,7 +624,50 @@ Processed station/price counters, process metrics, generic JDBC pool metrics, ma
 
 The dashboard panel titled **Recent/time-window maximum ingestion duration** uses Micrometer Timer max. This is a decaying time-window maximum, not an all-time maximum.
 
-The observability files are under [`observability/`](observability). The profile is intentionally optional:
+#### Alert ownership and notification status
+
+Prometheus evaluates every active rule in [`observability/prometheus/rules/fuel-finder-alerts.yml`](observability/prometheus/rules/fuel-finder-alerts.yml). Grafana remains the visualization layer and has no Grafana-managed alert rules.
+
+Alertmanager is not configured. Consequently, no email, Slack, webhook, or other notification delivery exists. The rule labels `action=page` and `action=warn` are future routing classifications only; they do not send notifications. Pending and firing alerts are currently visible through the Prometheus UI and API.
+
+#### Active alert catalogue
+
+| Alert | Purpose | Severity | Action | Threshold/window | Pending duration | Main operational limitation |
+|---|---|---|---|---|---|---|
+| `FuelFinderTargetUnavailable` | Detect that Prometheus cannot scrape the Fuel Finder target. | `critical` | `page` | `up{job="fuel-finder"} == 0` | `2m` | `up` proves scrape reachability only, not external Fuel Finder API or application end-to-end availability. |
+| `FuelFinderIngestionAttemptMissing` | Detect a missing or stale ingestion attempt while the target remains scrapeable. | `critical` | `page` | Last-attempt timestamp is older than `45m`, or remains zero after process uptime exceeds `45m`; requires `up == 1`. | `5m` | The timestamp is also updated by manual ingestion and proves neither scheduler execution nor ShedLock acquisition; a long-running ingestion can make the next attempt appear overdue. |
+| `FuelFinderIngestionNotSucceeding` | Detect repeated completed ingestion failures without an intervening success. | `critical` | `page` | At least `2` failures and `0` successes in `75m`, with a non-zero attempt no older than `45m` and `up == 1`. | `5m` | Completion counters reset on restart, and manual and scheduled runs are indistinguishable. |
+| `FuelFinderReconciliationFailed` | Surface unexplained reconciliation mismatches. | `warning` | `warn` | More than `0` `status="failed"` outcomes in `45m`. | None; active on the first matching evaluation. | The metric exposes status but not mismatch reason or magnitude. |
+| `FuelFinderDatabasePoolSaturated` | Detect sustained HikariCP connection pressure with waiting borrowers. | `warning` | `warn` | Active/max connections at least `90%` and pending borrowers greater than `0`, matched by `job`, `instance`, and `pool`. | `5m` | It identifies pool contention but not whether the cause is database health, slow queries, leaks, or application load. |
+
+The `action` column records intended future delivery treatment only. It has no effect until notification routing is implemented.
+
+#### Reconciliation alert policy
+
+A reconciliation outcome of `failed` is an active warning because it represents an unexplained accounting mismatch. `ok_with_skips` remains dashboard-only: it combines normal duplicate handling with other accounted skips and exposes neither the reason nor magnitude needed for a reliable alert threshold.
+
+#### Dashboard-only HTTP candidates
+
+The 4xx ratio remains visible as an operational and client-validation signal; it is intentionally separate from server failures. The dashboard also shows two informational candidates over non-Actuator traffic:
+
+- 5xx ratio above `5%` with at least `20` requests in `10m`
+- mean latency above `1s` with at least `20` requests in `10m`
+
+Neither condition is an active Prometheus alert, and Grafana does not evaluate them as alerts. Production traffic baselines and an explicit API service objective are required before either candidate can be promoted to an alert rule.
+
+#### Known alerting limitations
+
+- Manual ingestion updates the same attempt, completion, and freshness metrics as scheduled ingestion.
+- The last-attempt timestamp does not prove that the scheduler executed or that ShedLock was acquired.
+- ShedLock has no dedicated metric.
+- Because the last-attempt gauge records the attempt start, a long-running ingestion may resemble a missing subsequent attempt.
+- Prometheus `up` measures scrape reachability, not external end-to-end Fuel Finder API availability.
+- Prometheus cannot detect or report its own failure without an external monitor.
+- Application restarts reset timestamp gauges and counters as described above.
+
+#### Local validation and inspection
+
+The observability files are under [`observability/`](observability). The profile is intentionally optional. Run these commands from the repository root:
 
 ```bash
 # Database only
@@ -610,6 +679,21 @@ docker compose --profile observability up -d
 # Stop Prometheus and Grafana without stopping PostgreSQL
 docker compose --profile observability stop prometheus grafana
 ```
+
+With the host-run backend available on port `8080`, inspect:
+
+- [Prometheus Rules UI](http://localhost:9090/rules)
+- [Prometheus Rules API](http://localhost:9090/api/v1/rules)
+- [Prometheus Alerts API](http://localhost:9090/api/v1/alerts)
+
+For command-line inspection:
+
+```bash
+curl --fail --silent http://localhost:9090/api/v1/rules
+curl --fail --silent http://localhost:9090/api/v1/alerts
+```
+
+The stop command names only the current Compose services `prometheus` and `grafana`, so the `db` service and its PostgreSQL data remain running.
 
 ## CI
 
@@ -691,7 +775,7 @@ On Windows PowerShell:
 .\gradlew.bat test jacocoTestReport
 ```
 
-The HTML report is written to [`backend/build/reports/jacoco/test/html/index.html`](backend/build/reports/jacoco/test/html/index.html).
+The HTML report is written to `backend/build/reports/jacoco/test/html/index.html`.
 
 Run only selected unit tests:
 
@@ -783,13 +867,16 @@ Near-term priorities:
 - extend read APIs with richer filters and query shapes
 - extend integration tests to cover more ingestion edge cases and failure paths
 - tune the existing HTTP timeout, pool, and retry defaults with representative load and ingestion-duration data
-- define service-level objectives and alert rules from the existing Prometheus metrics and Grafana dashboard
+- configure Alertmanager notification delivery and route the existing `page` and `warn` classifications
+- add external monitoring for Prometheus and end-to-end service availability
+- tune alert thresholds against production traffic and ingestion behavior
+- define an API service objective and promote the HTTP 5xx/latency candidates only when production evidence supports it
 - secure and route the Prometheus endpoint within the eventual production monitoring network
 - evaluate distributed tracing only if cross-service diagnostic needs justify it
 - publish versioned Docker images to a registry and add deployment/promotion workflows
 - raise JaCoCo coverage thresholds over time
 
-Bounded HTTP resilience and metrics/dashboard observability are implemented foundations; the remaining work is operational tuning, alerting, controlled production access, and deployment integration.
+Bounded HTTP resilience, metrics/dashboard observability, and Prometheus alert-rule evaluation are implemented foundations; the remaining observability work is notification delivery, external monitoring, production threshold tuning, HTTP alert promotion, and controlled production access.
 
 ## Why This Project
 
