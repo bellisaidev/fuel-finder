@@ -6,7 +6,7 @@ This document defines the security checks used by Fuel Finder's GitHub Actions w
 
 All workflows deny token permissions by default with `permissions: {}` and grant only the permissions required by each job. Repository checkout does not persist credentials. Pull request workflows use `pull_request`, never `pull_request_target`, and do not receive repository or runtime secrets.
 
-Gradle cache entries are read-only on pull request runs. Trusted pushes to the default branch may update the existing Gradle cache. The container workflow builds and scans a local image only; it does not publish an image or create a deployable artifact.
+Gradle cache entries are read-only on pull request runs. Trusted pushes to the default branch may update the existing Gradle cache. Pull requests build and scan a local container image without registry authentication or publication. Only the master publishing job receives `packages: write`; it authenticates with `GITHUB_TOKEN` and never passes registry credentials to the Docker build.
 
 ## Dependency Review
 
@@ -28,12 +28,28 @@ The repository currently contains Java only. If Kotlin is introduced, change Cod
 
 ## Container vulnerability scanning
 
-Trivy scans the locally built final image on every applicable CI pull request and push. It reports High and Critical operating-system and Java-library vulnerabilities in a table in the job log and generates SARIF containing only those severities. Findings are informational and Trivy exits successfully when vulnerabilities are present.
+Trivy scans the final local image on pull requests. On trusted pushes to `master`, the workflow first reconciles the immutable full-commit-SHA tag in GHCR. A missing tag causes the image to be built once and scanned locally before it is pushed. An existing tag is never rebuilt or overwritten; its revision metadata and digest are validated, and Trivy scans the canonical digest-qualified remote image instead.
 
-The workflow attempts to upload SARIF for `pull_request` runs targeting `master` and trusted pushes to `master`. GitHub applies the effective `security-events` permission for each event. The table report remains available in the job log even when SARIF cannot be uploaded. Do not introduce an event-specific upload exclusion unless an actual repository run demonstrates that it is required.
+The table report and SARIF contain High and Critical operating-system and Java-library findings. High findings remain informational. A separate Critical-only Trivy invocation blocks publication or reuse when a Critical vulnerability is present. Docker build failures and Trivy execution failures also block the workflow.
+
+The workflow attempts to upload SARIF for pull requests targeting `master` and trusted pushes to `master`. GitHub applies the effective `security-events` permission for each event. On the publishing path, SARIF upload uses `always()` and is non-blocking: the report remains visible when the Critical gate fails, while an upload service failure cannot by itself block a verified image. The table report remains available in the job log.
+
+## Container publication
+
+The runtime image is published only as `ghcr.io/bellisaidev/fuel-finder:<full-git-sha>`. The workflow creates no mutable tags and uploads no image workflow artifact. New images carry `org.opencontainers.image.source` and `org.opencontainers.image.revision` labels supplied by the build command; the Dockerfile remains environment-agnostic.
+
+SHA tags are treated as write-once. After authenticating, the master job proceeds to a build only when registry inspection returns an explicit not-found result. It confirms the tag is still absent after scanning and immediately before its single push. Any ambiguous registry failure or tag appearing during validation is handled as an error without overwriting the remote artifact. If the tag already exists, its revision label must equal the current full Git SHA and its manifest digest must be valid. The workflow scans that digest, verifies that the tag has not moved, and reports the existing artifact as reused without building or pushing.
+
+After a new push, the same remote revision and digest checks are required. The job summary reports whether the artifact was published or reused, the SHA tag, and the digest-qualified reference. A future staging workflow must consume `ghcr.io/bellisaidev/fuel-finder@sha256:<digest>` so it selects the verified registry manifest; this workflow does not deploy anything.
+
+GHCR does not enforce immutable container tags. Package write access must therefore remain limited to trusted maintainers and the master publishing workflow.
+
+### First-publication package settings
+
+The package remains private while the first published artifact is checked. Verify its full-SHA tag, revision label, registry digest, and digest-qualified reference before deliberately changing the package visibility to **Public**. Then confirm that the package is connected to `bellisaidev/fuel-finder`, repository Actions access is correct, and both the SHA tag and digest can be pulled anonymously.
 
 ## Remediation and exceptions
 
 Critical and High findings receive remediation priority. A future exception must identify a specific CVE, document its justification, and have a time limit. This increment defines no exceptions and includes no Trivy ignore file.
 
-Dependency update automation, dependency locking and verification, Gradle Wrapper checksums, dependency submission, blocking Trivy gates, ignore files, Docker digest pinning, image publishing, and deployment are outside this increment. Dependency update automation is deferred to a separate dependency-governance increment.
+Dependency update automation, dependency locking and verification, Gradle Wrapper checksums, dependency submission, Trivy ignore files, Docker base-image digest pinning, mutable or semantic-version image tags, SBOMs, attestations, signing, multi-platform builds, registry retention automation, and deployment are outside this increment. Dependency update automation is deferred to a separate dependency-governance increment.
