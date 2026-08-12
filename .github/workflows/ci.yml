@@ -56,9 +56,10 @@ jobs:
       - name: Build Spring Boot JAR
         run: ./gradlew bootJar
 
-  container-build-and-scan:
-    name: Build and Scan Container Image
+  container-build-and-scan-pr:
+    name: Build and Scan Pull Request Container Image
     needs: build-and-test
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -79,7 +80,12 @@ jobs:
           persist-credentials: false
 
       - name: Build Docker image
-        run: docker build --pull --tag "$IMAGE_REF" .
+        run: |
+          docker build --pull \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --tag "$IMAGE_REF" \
+            .
 
       - name: Scan image for High and Critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -111,3 +117,209 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
           category: trivy-container
+
+  container-publish-and-scan:
+    name: Publish or Reuse Verified Container Image
+    needs: build-and-test
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    outputs:
+      result: ${{ steps.finalize.outputs.result }}
+      image_ref: ${{ steps.finalize.outputs.image_ref }}
+      digest: ${{ steps.finalize.outputs.digest }}
+      digest_ref: ${{ steps.finalize.outputs.digest_ref }}
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      IMAGE_NAME: ghcr.io/bellisaidev/fuel-finder
+      IMAGE_REF: ghcr.io/bellisaidev/fuel-finder:${{ github.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reconcile immutable SHA tag
+        id: reconcile
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          error_file="$(mktemp)"
+          trap 'rm -f "$error_file"' EXIT
+          set +e
+          manifest_json="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Manifest}}' 2>"$error_file")"
+          inspect_status=$?
+          set -e
+
+          if [[ $inspect_status -eq 0 ]]; then
+            digest="$(jq -er '.digest' <<<"$manifest_json")"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Remote SHA tag returned an invalid manifest digest: $digest" >&2
+              exit 1
+            fi
+
+            image_json="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Image}}')"
+            revision="$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"$image_json")"
+            if [[ "$revision" != "$GITHUB_SHA" ]]; then
+              echo "Remote SHA tag revision '$revision' does not match '$GITHUB_SHA'." >&2
+              exit 1
+            fi
+
+            docker buildx imagetools inspect "$IMAGE_NAME@$digest" --format '{{json .Manifest}}' >/dev/null
+            echo "state=existing" >>"$GITHUB_OUTPUT"
+            echo "scan_ref=$IMAGE_NAME@$digest" >>"$GITHUB_OUTPUT"
+            echo "initial_digest=$digest" >>"$GITHUB_OUTPUT"
+          elif grep -Eiq 'manifest unknown|unexpected status from (HEAD|GET) request.*404 Not Found|(^|: )not found$' "$error_file"; then
+            echo "state=absent" >>"$GITHUB_OUTPUT"
+            echo "scan_ref=$IMAGE_REF" >>"$GITHUB_OUTPUT"
+            echo "initial_digest=" >>"$GITHUB_OUTPUT"
+          else
+            echo "Unable to classify the remote SHA tag safely; refusing to build or push." >&2
+            cat "$error_file" >&2
+            exit 1
+          fi
+
+      - name: Build Docker image
+        if: ${{ steps.reconcile.outputs.state == 'absent' }}
+        run: |
+          docker build --pull \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --tag "$IMAGE_REF" \
+            .
+
+      - name: Scan image for High and Critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.reconcile.outputs.scan_ref }}
+          format: table
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          vuln-type: os,library
+          version: v0.70.0
+
+      - name: Generate High and Critical vulnerability SARIF
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.reconcile.outputs.scan_ref }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+          severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
+          scanners: vuln
+          vuln-type: os,library
+          skip-setup-trivy: true
+
+      - name: Block publication on Critical vulnerabilities
+        id: critical_gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.reconcile.outputs.scan_ref }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+          scanners: vuln
+          vuln-type: os,library
+          skip-setup-trivy: true
+
+      - name: Upload Trivy results to GitHub code scanning
+        if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-container
+
+      - name: Publish or reuse verified image
+        id: finalize
+        if: ${{ steps.critical_gate.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          state="${{ steps.reconcile.outputs.state }}"
+          initial_digest="${{ steps.reconcile.outputs.initial_digest }}"
+
+          if [[ "$state" == "absent" ]]; then
+            error_file="$(mktemp)"
+            trap 'rm -f "$error_file"' EXIT
+            set +e
+            docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Manifest}}' >/dev/null 2>"$error_file"
+            inspect_status=$?
+            set -e
+
+            if [[ $inspect_status -eq 0 ]]; then
+              echo "Remote SHA tag appeared during validation; refusing to overwrite it." >&2
+              exit 1
+            elif ! grep -Eiq 'manifest unknown|unexpected status from (HEAD|GET) request.*404 Not Found|(^|: )not found$' "$error_file"; then
+              echo "Unable to confirm that the remote SHA tag is still absent; refusing to push." >&2
+              cat "$error_file" >&2
+              exit 1
+            fi
+
+            docker push "$IMAGE_REF"
+            result="published"
+          elif [[ "$state" == "existing" ]]; then
+            result="reused"
+          else
+            echo "Unexpected reconciliation state: $state" >&2
+            exit 1
+          fi
+
+          manifest_json="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Manifest}}')"
+          digest="$(jq -er '.digest' <<<"$manifest_json")"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Remote SHA tag returned an invalid manifest digest: $digest" >&2
+            exit 1
+          fi
+
+          if [[ "$state" == "existing" && "$digest" != "$initial_digest" ]]; then
+            echo "Remote SHA tag moved during validation: $initial_digest -> $digest" >&2
+            exit 1
+          fi
+
+          image_json="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Image}}')"
+          revision="$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"$image_json")"
+          if [[ "$revision" != "$GITHUB_SHA" ]]; then
+            echo "Remote SHA tag revision '$revision' does not match '$GITHUB_SHA'." >&2
+            exit 1
+          fi
+
+          digest_ref="$IMAGE_NAME@$digest"
+          docker buildx imagetools inspect "$digest_ref" --format '{{json .Manifest}}' >/dev/null
+
+          echo "result=$result" >>"$GITHUB_OUTPUT"
+          echo "image_ref=$IMAGE_REF" >>"$GITHUB_OUTPUT"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          echo "digest_ref=$digest_ref" >>"$GITHUB_OUTPUT"
+
+          {
+            echo "### Fuel Finder container image"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Result | \`$result\` |"
+            echo "| SHA tag | \`$IMAGE_REF\` |"
+            echo "| Registry digest | \`$digest\` |"
+            echo "| Digest reference | \`$digest_ref\` |"
+          } >>"$GITHUB_STEP_SUMMARY"

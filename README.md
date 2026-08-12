@@ -12,7 +12,7 @@ What is implemented today:
 - PostgreSQL + PostGIS local environment via Docker Compose
 - Optional Prometheus and Grafana local observability stack
 - Backend Docker image build
-- GitHub Actions CI for tests, coverage verification, JAR build, and Docker build
+- GitHub Actions CI for tests, coverage verification, JAR build, container scanning, and verified GHCR publishing
 - Flyway database migrations
 - OAuth2 client credentials integration with the Fuel Finder API
 - Shared bounded Reactor Netty transport with configurable connection pooling, timeouts, retry/backoff, `Retry-After` handling, and centralized failure mapping
@@ -435,6 +435,25 @@ docker build -t fuel-finder-backend:local .
 
 The Docker image does not hard-code a Spring profile. Production deployments should explicitly set `SPRING_PROFILES_ACTIVE=prod` at runtime and provide the required database and Fuel Finder API configuration through environment variables/secrets.
 
+Trusted pushes to `master` publish the verified runtime image to GitHub Container Registry using only the full Git commit SHA as its tag:
+
+```text
+ghcr.io/bellisaidev/fuel-finder:<full-git-sha>
+```
+
+The SHA tag is write-once in the CI workflow. A rerun validates and scans the existing registry artifact by digest without rebuilding or overwriting it. The workflow reports the resolved reference in its job summary:
+
+```text
+ghcr.io/bellisaidev/fuel-finder@sha256:<verified-registry-digest>
+```
+
+Future staging configuration should consume the digest-qualified reference so that it runs the exact verified manifest. This workflow does not deploy the image. After the first image is published privately, its SHA tag, OCI revision label, and digest must be verified before a maintainer deliberately changes the GHCR package visibility to public. Once public, either reference can be pulled anonymously:
+
+```bash
+docker pull ghcr.io/bellisaidev/fuel-finder:<full-git-sha>
+docker pull ghcr.io/bellisaidev/fuel-finder@sha256:<verified-registry-digest>
+```
+
 ## Production Runtime Configuration
 
 The Docker image is environment-agnostic: it does not set a Spring profile, so the same image can be promoted between environments. A production deployment must set `SPRING_PROFILES_ACTIVE=prod`. This is a deployment requirement rather than an `application-prod.yml` placeholder.
@@ -708,11 +727,15 @@ The workflow runs on push and pull requests targeting `master`, using the backen
 - runs `./gradlew test`
 - runs `./gradlew jacocoTestCoverageVerification`
 - builds the Spring Boot JAR with `./gradlew bootJar`
-- builds the backend Docker image and reports its High/Critical vulnerabilities
+- builds and scans a local backend image without authenticating or publishing on pull requests
+- reconciles the full-SHA GHCR tag before building on trusted pushes to `master`
+- builds, scans, and publishes a missing SHA image once, or scans and reuses the existing canonical digest
+- reports High/Critical vulnerabilities while blocking publication or reuse only for Critical findings
+- reports the verified registry digest for future staging consumption
 
 The test task includes integration tests matching `*IT`, so CI requires Docker for Testcontainers.
 
-Separate security workflows review pull-request dependency changes and analyze Java with CodeQL.
+High findings remain informational. In the publishing job, SARIF upload failures are also non-blocking. Docker build failures, Trivy execution failures, and Critical findings block publication or reuse. Separate security workflows review pull-request dependency changes and analyze Java with CodeQL.
 
 ## Testing
 
@@ -881,7 +904,7 @@ Near-term priorities:
 - define an API service objective and promote the HTTP 5xx/latency candidates only when production evidence supports it
 - secure and route the Prometheus endpoint within the eventual production monitoring network
 - evaluate distributed tracing only if cross-service diagnostic needs justify it
-- publish versioned Docker images to a registry and add deployment/promotion workflows
+- define semantic release tags and add deployment/promotion workflows
 - raise JaCoCo coverage thresholds over time
 
 Bounded HTTP resilience, metrics/dashboard observability, and Prometheus alert-rule evaluation are implemented foundations; the remaining observability work is notification delivery, external monitoring, production threshold tuning, HTTP alert promotion, and controlled production access.
