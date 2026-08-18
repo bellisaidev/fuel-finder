@@ -29,7 +29,7 @@ services:
       - prometheus_data:/prometheus
 
   grafana:
-    image: grafana/grafana:12.1.0
+    image: grafana/grafana:13.1.4
     profiles: ["observability"]
     restart: unless-stopped
     depends_on:
