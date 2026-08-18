@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk-jammy AS build
+FROM eclipse-temurin:22-jdk-jammy AS build
 
 WORKDIR /workspace
 
@@ -14,7 +14,7 @@ COPY src ./src
 RUN ./gradlew --no-daemon bootJar
 
 
-FROM eclipse-temurin:21-jre-jammy AS runtime
+FROM eclipse-temurin:22-jre-jammy AS runtime
 
 WORKDIR /app
 
