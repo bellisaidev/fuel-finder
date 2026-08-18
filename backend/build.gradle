@@ -51,8 +51,8 @@ dependencies {
     implementation 'org.locationtech.jts:jts-core:1.20.0'
 
     //Shedlock
-    implementation 'net.javacrumbs.shedlock:shedlock-spring:5.16.0'
-    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:7.8.0'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.8.0'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
