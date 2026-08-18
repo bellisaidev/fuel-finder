@@ -720,6 +720,8 @@ GitHub Actions CI is defined in [ci.yml](.github/workflows/ci.yml).
 
 The repository's blocking and informational security checks are described in the [CI security policy](docs/ci-security-policy.md).
 
+Weekly Dependabot version updates are configured in [dependabot.yml](.github/dependabot.yml) for Gradle, GitHub Actions, Dockerfile base images, and Docker Compose images. Compatible minor and patch updates are grouped where appropriate, while major updates and Gradle Wrapper updates remain standalone for explicit review. Dependabot does not auto-merge; its pull requests run through the same CI, Dependency Review, CodeQL, and Trivy checks as other pull requests.
+
 The workflow runs on push and pull requests targeting `master`, using the backend module as its working directory. It currently:
 
 - sets up Java 21 with Temurin
@@ -829,6 +831,7 @@ This selector does not include integration-style classes whose names end in `Int
 ```text
 fuel-finder/
 |-- .github/
+|   |-- dependabot.yml
 |   `-- workflows/
 |       |-- ci.yml
 |       |-- codeql.yml

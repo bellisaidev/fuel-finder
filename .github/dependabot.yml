@@ -1,0 +1,73 @@
+version: 2
+
+updates:
+  - package-ecosystem: gradle
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    groups:
+      backend-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        exclude-patterns:
+          - gradle-wrapper
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "04:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 3
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "04:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 2
+    groups:
+      temurin-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - eclipse-temurin
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: thursday
+      time: "04:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 3
+    groups:
+      observability-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - prom/prometheus
+          - grafana/grafana
+        update-types:
+          - minor
+          - patch

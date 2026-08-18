@@ -8,6 +8,25 @@ All workflows deny token permissions by default with `permissions: {}` and grant
 
 Gradle cache entries are read-only on pull request runs. Trusted pushes to the default branch may update the existing Gradle cache. Pull requests build and scan a local container image without registry authentication or publication. Only the master publishing job receives `packages: write`; it authenticates with `GITHUB_TOKEN` and never passes registry credentials to the Docker build.
 
+## Dependency update management
+
+Dependabot checks each supported dependency surface weekly on staggered weekday schedules in the `Europe/Zurich` timezone:
+
+- Gradle manifests and the Gradle Wrapper under `/backend` on Monday;
+- GitHub Actions under `/` on Tuesday;
+- Dockerfile base images under `/backend` on Wednesday; and
+- Docker Compose images under `/` on Thursday.
+
+Compatible minor and patch version updates are grouped to reduce pull request volume. Backend library and plugin updates share one group, but `gradle-wrapper` is explicitly excluded so every Gradle Wrapper update remains a standalone pull request. GitHub Actions minor and patch updates share one group. The two Temurin Dockerfile stages move together, while the Prometheus and Grafana Compose images share an observability group. PostGIS remains standalone because database image updates require focused persistence review. Major updates do not match these groups and are raised separately for explicit review.
+
+The configured open pull request limits are five for Gradle, three for GitHub Actions, two for Dockerfile images and three for Docker Compose images. These limits apply to version updates; security updates are handled independently. Dependabot does not auto-merge any pull request, and every update remains subject to repository review requirements and the existing CI and security gates.
+
+GitHub Actions stay pinned to full immutable commit SHAs. Dependabot updates both the SHA and the same-line version comment, which must remain in the `uses: owner/repository@<full-sha> # <version>` form. Dockerfile and Docker Compose use separate Dependabot entries because they are separate package ecosystems in different directories. Docker digest pinning remains outside this increment.
+
+Dependabot pull requests are treated as untrusted, fork-like executions. They use the existing `pull_request` workflows with a read-only token, no Actions secrets, no registry login and no publication. CodeQL and Trivy SARIF uploads remain supported on the `pull_request` event. Accepted Dependabot pull requests must be merged manually with a merge commit; squash-merging a Dependabot-authored commit can cause the subsequent trusted `push` workflow to receive read-only permissions.
+
+The Gradle entry provides version updates for directly declared dependencies and build tooling. Dependabot security updates for Gradle remain limited without dependency submission, which is outside this increment; Dependency Review continues to evaluate dependency changes introduced by every pull request.
+
 ## Dependency Review
 
 Dependency Review runs on pull requests targeting `master`. It blocks a pull request that introduces a dependency with a known High or Critical vulnerability in a runtime, development, or unknown scope. The check evaluates dependency changes in the pull request rather than treating existing repository findings as newly introduced failures.
@@ -52,4 +71,4 @@ The package remains private while the first published artifact is checked. Verif
 
 Critical and High findings receive remediation priority. A future exception must identify a specific CVE, document its justification, and have a time limit. This increment defines no exceptions and includes no Trivy ignore file.
 
-Dependency update automation, dependency locking and verification, Gradle Wrapper checksums, dependency submission, Trivy ignore files, Docker base-image digest pinning, mutable or semantic-version image tags, SBOMs, attestations, signing, multi-platform builds, registry retention automation, and deployment are outside this increment. Dependency update automation is deferred to a separate dependency-governance increment.
+Dependency locking and verification, Gradle Wrapper distribution checksums, dependency submission, Trivy ignore files, Docker base-image digest pinning, mutable or semantic-version image tags, SBOMs, attestations, signing, multi-platform builds, registry retention automation, semantic release automation and deployment are outside this increment.
